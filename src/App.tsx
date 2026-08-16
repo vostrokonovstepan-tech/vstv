@@ -5,6 +5,7 @@ import { TimerBar } from './components/TimerBar'
 import { Today } from './screens/Today'
 import { Goals } from './screens/Goals'
 import { GoalDetail } from './screens/GoalDetail'
+import { Assistant } from './screens/Assistant'
 import { Profile } from './screens/Profile'
 import { bindTheme, initViewport } from './lib/telegram'
 
@@ -62,6 +63,8 @@ function Router() {
         <Today />
       ) : tab === 'goals' ? (
         <Goals onOpen={setOpenGoalId} />
+      ) : tab === 'assistant' ? (
+        <Assistant />
       ) : (
         <Profile />
       )}

@@ -11,6 +11,7 @@ import {
 import type { AccentKey, DayLog, Goal, MonthLog, RunningTimer, Task } from './types'
 import { dayOf, monthOf, recentMonths, today } from './lib/date'
 import { DEFAULT_AI, type AiSettings } from './lib/ai'
+import type { Action } from './lib/aiChat'
 import {
   flushAll,
   getMany,
@@ -74,6 +75,9 @@ export type Store = {
 
   startTimer: (goalId: string, taskId?: string) => void
   stopTimer: () => void
+
+  /** Применяет пачку действий ассистента за один проход. Возвращает описания применённого. */
+  applyAiActions: (actions: Action[]) => string[]
 }
 
 const StoreContext = createContext<Store | null>(null)
@@ -288,6 +292,71 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (loaded.current) void removeItem(K_TIMER).catch(() => {})
   }, [timer, addSeconds])
 
+  /**
+   * Действия применяются одним проходом намеренно: addGoal и addTask захватывают
+   * массив на момент вызова, поэтому подряд идущие вызовы затирали бы друг друга.
+   * Здесь же цели и задачи накапливаются локально и сохраняются по разу каждая.
+   */
+  const applyAiActions = useCallback(
+    (actions: Action[]): string[] => {
+      const date = today()
+      const nextGoals = [...goals]
+      const nextTasks = [...tasks]
+      const applied: string[] = []
+      const completed: string[] = []
+
+      const findGoal = (title: string) =>
+        nextGoals.find((g) => g.title.toLowerCase() === title.trim().toLowerCase())
+
+      for (const action of actions) {
+        if (action.type === 'create_goal') {
+          if (findGoal(action.title)) continue
+          nextGoals.push({
+            id: newId(),
+            createdAt: date,
+            title: action.title,
+            emoji: action.emoji,
+            accent: action.accent,
+            deadline: action.deadline,
+          })
+          applied.push(`${action.emoji} Цель «${action.title}»`)
+        } else if (action.type === 'create_task') {
+          const goal = findGoal(action.goal)
+          if (!goal) continue
+          const duplicate = nextTasks.some(
+            (t) => t.goalId === goal.id && t.title.toLowerCase() === action.title.toLowerCase(),
+          )
+          if (duplicate) continue
+          nextTasks.push({
+            id: newId(),
+            createdAt: date,
+            goalId: goal.id,
+            title: action.title,
+            days: action.days,
+            date: action.date,
+          })
+          applied.push(`Задача «${action.title}»`)
+        } else if (action.type === 'complete_task') {
+          const task = nextTasks.find(
+            (t) => t.title.toLowerCase() === action.task.trim().toLowerCase(),
+          )
+          if (!task || completed.includes(task.id)) continue
+          if (!isDone(date, task.id)) {
+            completed.push(task.id)
+            applied.push(`Отмечено: «${task.title}»`)
+          }
+        }
+      }
+
+      if (nextGoals.length !== goals.length) persistGoals(nextGoals)
+      if (nextTasks.length !== tasks.length) persistTasks(nextTasks)
+      for (const id of completed) toggleTask(date, id)
+
+      return applied
+    },
+    [goals, tasks, isDone, persistGoals, persistTasks, toggleTask],
+  )
+
   const value = useMemo<Store>(
     () => ({
       ready,
@@ -311,11 +380,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       addSeconds,
       startTimer,
       stopTimer,
+      applyAiActions,
     }),
     [
       ready, error, goals, tasks, months, timer, ai, setAi, dayLog, isDone,
       addGoal, updateGoal, removeGoal, addTask, updateTask, removeTask,
-      toggleTask, addSeconds, startTimer, stopTimer,
+      toggleTask, addSeconds, startTimer, stopTimer, applyAiActions,
     ],
   )
 
