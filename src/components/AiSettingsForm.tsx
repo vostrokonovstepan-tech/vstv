@@ -211,6 +211,44 @@ export function AiSettingsForm({
         {status.kind === 'busy' && status.what === 'test' ? 'Проверяю…' : 'Проверить соединение'}
       </Button>
 
+      <div className="pt-2">
+        <Field label="Голосовой ввод — необязательно">
+          <p className="mb-3 px-1 text-[13px] leading-snug text-hint">
+            Не у всех провайдеров с рабочим чатом есть распознавание речи — например, у OpenRouter
+            его нет. Проще всего указать здесь ключ Groq и модель{' '}
+            <code className="rounded bg-surface px-1 py-0.5">whisper-large-v3-turbo</code> — у нас
+            уже есть свой ключ на чат, для голоса можно завести отдельный бесплатный.
+          </p>
+          <div className="space-y-2">
+            <TextInput
+              value={draft.voiceModel ?? ''}
+              onChange={(e) => patch({ voiceModel: e.target.value })}
+              placeholder="whisper-large-v3-turbo"
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
+            />
+            <TextInput
+              value={draft.voiceBaseUrl ?? ''}
+              onChange={(e) => patch({ voiceBaseUrl: e.target.value })}
+              placeholder="Адрес API — пусто значит тот же, что для чата"
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
+            />
+            <TextInput
+              type="password"
+              value={draft.voiceApiKey ?? ''}
+              onChange={(e) => patch({ voiceApiKey: e.target.value })}
+              placeholder="Ключ — пусто значит тот же, что для чата"
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
+            />
+          </div>
+        </Field>
+      </div>
+
       <Button onClick={save} disabled={!aiConfigured(draft)}>
         Сохранить
       </Button>

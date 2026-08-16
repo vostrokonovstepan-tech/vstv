@@ -13,12 +13,37 @@ export type AiSettings = {
   baseUrl: string
   apiKey: string
   model: string
+  /**
+   * Распознавание голоса — отдельные, необязательные настройки. Не все провайдеры
+   * с рабочим чатом умеют /audio/transcriptions (например, в каталоге OpenRouter
+   * нет ни одной модели-транскрайбера), поэтому голос можно направить к другому
+   * провайдеру, не трогая основной чат. Пустые baseUrl/apiKey — значит те же, что у чата.
+   */
+  voiceBaseUrl?: string
+  voiceApiKey?: string
+  voiceModel?: string
 }
 
 export const DEFAULT_AI: AiSettings = {
   baseUrl: 'https://openrouter.ai/api/v1',
   apiKey: '',
   model: '',
+  voiceBaseUrl: '',
+  voiceApiKey: '',
+  voiceModel: '',
+}
+
+/** Голос включён, если явно указана модель — угадывать её мы не можем. */
+export function voiceConfigured(s: AiSettings | null | undefined): boolean {
+  return Boolean(s?.voiceModel?.trim())
+}
+
+function resolveVoiceConfig(s: AiSettings): AiSettings {
+  return {
+    baseUrl: s.voiceBaseUrl?.trim() || s.baseUrl,
+    apiKey: s.voiceApiKey?.trim() || s.apiKey,
+    model: s.voiceModel?.trim() ?? '',
+  }
 }
 
 /** Известные провайдеры — чтобы не вспоминать адреса руками. */
@@ -196,6 +221,41 @@ export function extractJSON<T>(text: string): T {
     }
   }
   throw new AiError('Модель не дописала ответ до конца')
+}
+
+/** Распознаёт голосовую запись через /audio/transcriptions — эндпоинт формата Whisper. */
+export async function transcribe(
+  s: AiSettings,
+  audio: Blob,
+  filename: string,
+): Promise<string> {
+  const voice = resolveVoiceConfig(s)
+  if (!voice.model) throw new AiError('Модель распознавания голоса не настроена')
+
+  const form = new FormData()
+  form.append('file', audio, filename)
+  form.append('model', voice.model)
+
+  const res = await fetch(`${trimUrl(voice.baseUrl)}/audio/transcriptions`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${voice.apiKey.trim()}`,
+      'HTTP-Referer': location.origin,
+      'X-Title': 'Goal Tracker',
+      // Content-Type для FormData браузер выставляет сам, вместе с boundary —
+      // задав его руками, сломаем разбор тела на стороне сервера.
+    },
+    body: form,
+  }).catch(() => {
+    throw new AiError('Не удалось соединиться — проверь адрес API для голоса')
+  })
+
+  if (!res.ok) throw new AiError(await describeError(res), res.status)
+
+  const json = await res.json()
+  const text: string = json?.text ?? ''
+  if (!text.trim()) throw new AiError('Не удалось распознать речь — запись пустая?')
+  return text.trim()
 }
 
 /** Пробный запрос — проверяет разом адрес, ключ и модель. */

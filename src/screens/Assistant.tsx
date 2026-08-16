@@ -4,8 +4,10 @@ import { Screen, ScreenHeader } from '../components/Screen'
 import { Sheet } from '../components/Sheet'
 import { AiSettingsForm } from '../components/AiSettingsForm'
 import { Button, EmptyState } from '../components/ui'
-import { AiError, aiConfigured } from '../lib/ai'
+import { AiError, aiConfigured, transcribe, voiceConfigured } from '../lib/ai'
 import { askAssistant, type ChatTurn } from '../lib/aiChat'
+import { askWeeklyReview } from '../lib/aiWeekly'
+import { useVoiceRecorder } from '../lib/useVoiceRecorder'
 import { haptic } from '../lib/telegram'
 
 const newId = () => Math.random().toString(36).slice(2, 8)
@@ -16,14 +18,23 @@ const EXAMPLES = [
   'Составь план подготовки к марафону',
 ]
 
+/** mm:ss — таймер записи короткий, но formatDuration из lib/date рассчитан на часы. */
+function formatRecTime(s: number): string {
+  const m = Math.floor(s / 60)
+  const sec = s % 60
+  return `${m}:${String(sec).padStart(2, '0')}`
+}
+
 export function Assistant() {
   const store = useStore()
-  const { ai, setAi, goals, tasks } = store
+  const { ai, setAi, goals, tasks, months } = store
 
   const [turns, setTurns] = useState<ChatTurn[]>([])
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
+  const [weeklyBusy, setWeeklyBusy] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [voiceError, setVoiceError] = useState<string | null>(null)
 
   const bottomRef = useRef<HTMLDivElement>(null)
   const abortRef = useRef<AbortController | null>(null)
@@ -88,6 +99,58 @@ export function Assistant() {
     }
   }
 
+  const runWeeklyReview = async () => {
+    if (weeklyBusy) return
+    setWeeklyBusy(true)
+    setTurns((prev) => [...prev, { id: newId(), role: 'user', text: '📊 Разбор недели' }])
+
+    try {
+      const text = await askWeeklyReview(ai, goals, tasks, months)
+      setTurns((prev) => [...prev, { id: newId(), role: 'assistant', text }])
+    } catch (err) {
+      haptic('warning')
+      setTurns((prev) => [
+        ...prev,
+        {
+          id: newId(),
+          role: 'assistant',
+          text: err instanceof AiError ? err.message : 'Не удалось составить разбор',
+          failed: true,
+        },
+      ])
+    } finally {
+      setWeeklyBusy(false)
+    }
+  }
+
+  const recorder = useVoiceRecorder(
+    async (blob, mimeType) => {
+      const ext = mimeType.includes('mp4') ? 'm4a' : mimeType.includes('ogg') ? 'ogg' : 'webm'
+      try {
+        const text = await transcribe(ai, blob, `voice.${ext}`)
+        setDraft((d) => (d ? `${d} ${text}` : text))
+        haptic('select')
+      } catch (err) {
+        haptic('warning')
+        setVoiceError(err instanceof AiError ? err.message : 'Не удалось распознать речь')
+      } finally {
+        recorder.finish()
+      }
+    },
+    (message) => setVoiceError(message),
+  )
+
+  const toggleRecording = () => {
+    setVoiceError(null)
+    if (recorder.state === 'idle') {
+      haptic('tap')
+      void recorder.start()
+    } else if (recorder.state === 'recording') {
+      haptic('select')
+      recorder.stop()
+    }
+  }
+
   if (!aiConfigured(ai)) {
     return (
       <Screen>
@@ -109,7 +172,19 @@ export function Assistant() {
 
   return (
     <div className="mx-auto flex min-h-full w-full max-w-md flex-col px-4 pt-4 pb-40">
-      <ScreenHeader title="Помощник" subtitle={ai.model} />
+      <div className="flex items-start justify-between gap-3">
+        <ScreenHeader title="Помощник" subtitle={ai.model} />
+        {goals.length > 0 && (
+          <button
+            type="button"
+            onClick={() => void runWeeklyReview()}
+            disabled={weeklyBusy || busy}
+            className="press mt-1 flex shrink-0 items-center gap-1.5 rounded-full bg-surface px-3.5 py-2 text-[13px] font-medium disabled:opacity-40"
+          >
+            📊 {weeklyBusy ? 'Считаю…' : 'Разбор недели'}
+          </button>
+        )}
+      </div>
 
       <div className="flex-1 space-y-3 pt-2">
         {turns.length === 0 && (
@@ -184,38 +259,115 @@ export function Assistant() {
       </div>
 
       <div className="safe-bottom fixed inset-x-0 bottom-14 z-30 border-t border-line bg-bg/95 px-4 py-2.5 backdrop-blur">
-        <form
-          className="mx-auto flex max-w-md items-end gap-2"
-          onSubmit={(e) => {
-            e.preventDefault()
-            void send(draft)
-          }}
-        >
-          <textarea
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault()
-                void send(draft)
-              }
+        {voiceError && (
+          <p className="mx-auto mb-2 max-w-md text-[13px] leading-snug text-danger">
+            ⚠️ {voiceError}
+            {!voiceConfigured(ai) && (
+              <>
+                {' '}
+                <button
+                  type="button"
+                  onClick={() => setSettingsOpen(true)}
+                  className="underline"
+                >
+                  Настроить
+                </button>
+              </>
+            )}
+          </p>
+        )}
+
+        {recorder.state === 'recording' ? (
+          <div className="mx-auto flex max-w-md items-center gap-2">
+            <button
+              type="button"
+              onClick={recorder.cancel}
+              aria-label="Отменить запись"
+              className="press grid size-11 shrink-0 place-items-center rounded-full bg-surface text-hint"
+            >
+              <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth={2}>
+                <path d="M6 6l12 12M18 6 6 18" strokeLinecap="round" />
+              </svg>
+            </button>
+            <div className="flex flex-1 items-center gap-2.5 rounded-2xl bg-surface px-4 py-2.5">
+              <span className="relative flex size-2.5 shrink-0">
+                <span className="absolute inline-flex size-full animate-ping rounded-full bg-danger/70" />
+                <span className="relative inline-flex size-2.5 rounded-full bg-danger" />
+              </span>
+              <span className="tabular text-[15px]">{formatRecTime(recorder.seconds)}</span>
+              <span className="text-[14px] text-hint">Говори — я слушаю</span>
+            </div>
+            <button
+              type="button"
+              onClick={toggleRecording}
+              aria-label="Завершить запись"
+              className="press grid size-11 shrink-0 place-items-center rounded-full"
+              style={{ background: 'var(--color-accent)', color: 'var(--color-accent-ink)' }}
+            >
+              <svg viewBox="0 0 24 24" className="size-5" fill="currentColor">
+                <rect x="6" y="6" width="12" height="12" rx="2" />
+              </svg>
+            </button>
+          </div>
+        ) : (
+          <form
+            className="mx-auto flex max-w-md items-end gap-2"
+            onSubmit={(e) => {
+              e.preventDefault()
+              void send(draft)
             }}
-            rows={1}
-            placeholder="Напиши цель или задачу"
-            className="max-h-28 min-h-11 flex-1 resize-none rounded-2xl bg-surface px-4 py-2.5 text-[16px] outline-none placeholder:text-hint focus:ring-2 focus:ring-accent/40"
-          />
-          <button
-            type="submit"
-            disabled={!draft.trim() || busy}
-            aria-label="Отправить"
-            className="press grid size-11 shrink-0 place-items-center rounded-full disabled:opacity-40"
-            style={{ background: 'var(--color-accent)', color: 'var(--color-accent-ink)' }}
           >
-            <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth={2}>
-              <path d="M12 19V5M5 12l7-7 7 7" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </button>
-        </form>
+            <textarea
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault()
+                  void send(draft)
+                }
+              }}
+              rows={1}
+              placeholder={
+                recorder.state === 'processing' ? 'Распознаю…' : 'Напиши или наговори цель'
+              }
+              disabled={recorder.state === 'processing'}
+              className="max-h-28 min-h-11 flex-1 resize-none rounded-2xl bg-surface px-4 py-2.5 text-[16px] outline-none placeholder:text-hint focus:ring-2 focus:ring-accent/40 disabled:opacity-60"
+            />
+            {draft.trim() ? (
+              <button
+                type="submit"
+                disabled={busy}
+                aria-label="Отправить"
+                className="press grid size-11 shrink-0 place-items-center rounded-full disabled:opacity-40"
+                style={{ background: 'var(--color-accent)', color: 'var(--color-accent-ink)' }}
+              >
+                <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth={2}>
+                  <path d="M12 19V5M5 12l7-7 7 7" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={toggleRecording}
+                disabled={recorder.state === 'processing'}
+                aria-label="Записать голосом"
+                className="press grid size-11 shrink-0 place-items-center rounded-full disabled:opacity-40"
+                style={{ background: 'var(--color-accent)', color: 'var(--color-accent-ink)' }}
+              >
+                {recorder.state === 'processing' ? (
+                  <svg viewBox="0 0 24 24" className="size-5 animate-spin" fill="none" stroke="currentColor" strokeWidth={2}>
+                    <path d="M12 3a9 9 0 1 0 9 9" strokeLinecap="round" />
+                  </svg>
+                ) : (
+                  <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth={2}>
+                    <path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Z" strokeLinecap="round" strokeLinejoin="round" />
+                    <path d="M19 11a7 7 0 0 1-14 0M12 18v3" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                )}
+              </button>
+            )}
+          </form>
+        )}
       </div>
     </div>
   )
