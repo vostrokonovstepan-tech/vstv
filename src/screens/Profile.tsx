@@ -1,21 +1,14 @@
 import { useMemo, useState } from 'react'
 import { useStore } from '../store'
 import { Screen, ScreenHeader } from '../components/Screen'
-import { Heatmap } from '../components/Heatmap'
+import { MonthCalendar } from '../components/MonthCalendar'
 import { Sheet } from '../components/Sheet'
 import { AiSettingsForm } from '../components/AiSettingsForm'
 import { EmptyState, SectionTitle } from '../components/ui'
 import { aiConfigured } from '../lib/ai'
 import { accentColor } from '../lib/accents'
-import {
-  WEEKDAYS_SHORT,
-  formatHours,
-  plural,
-  shortWeekdayIndex,
-  today as todayISO,
-  weekdayOf,
-} from '../lib/date'
-import { currentStreak, daySeries, goalProgress, longestStreak, totalSeconds } from '../lib/progress'
+import { dayOf, formatHours, plural, today as todayISO } from '../lib/date'
+import { currentStreak, daySeries, goalProgress, longestStreak, taskProgress, totalSeconds } from '../lib/progress'
 import { telegramUser } from '../lib/telegram'
 
 const CHART_DAYS = 14
@@ -90,8 +83,8 @@ export function Profile() {
                         }}
                       />
                     </div>
-                    <span className={`text-[9px] ${isToday ? 'font-bold text-ink' : 'text-hint'}`}>
-                      {WEEKDAYS_SHORT[shortWeekdayIndex(weekdayOf(point.date))]}
+                    <span className={`tabular text-[9px] ${isToday ? 'font-bold text-ink' : 'text-hint'}`}>
+                      {dayOf(point.date)}
                     </span>
                   </div>
                 )
@@ -100,38 +93,51 @@ export function Profile() {
           </section>
 
           <section className="card space-y-3 p-4">
-            <SectionTitle>Активность по всем целям</SectionTitle>
-            <Heatmap tasks={tasks} months={months} color="var(--color-accent)" endDate={date} />
+            <SectionTitle>Календарь по всем целям</SectionTitle>
+            <MonthCalendar tasks={tasks} months={months} color="var(--color-accent)" />
           </section>
 
           <section className="card space-y-4 p-4">
-            <SectionTitle>По целям</SectionTitle>
-            {goals.map((goal) => {
-              const p = goalProgress(goal, tasks, months, date)
-              const color = accentColor(goal.accent)
-              return (
-                <div key={goal.id}>
-                  <div className="mb-1.5 flex items-baseline justify-between gap-2">
-                    <span className="truncate text-[15px]">
+            <SectionTitle>По задачам</SectionTitle>
+            {tasks.length === 0 ? (
+              <p className="px-1 text-[13px] text-hint">Задач пока нет.</p>
+            ) : (
+              goals.map((goal) => {
+                const goalTasks = tasks.filter((t) => t.goalId === goal.id)
+                if (goalTasks.length === 0) return null
+                const color = accentColor(goal.accent)
+                return (
+                  <div key={goal.id} className="space-y-3">
+                    <div className="truncate text-[13px] font-medium text-hint">
                       {goal.emoji} {goal.title}
-                    </span>
-                    <span className="tabular shrink-0 text-[13px] font-semibold" style={{ color }}>
-                      {Math.round(p.ratio * 100)}%
-                    </span>
+                    </div>
+                    {goalTasks.map((task) => {
+                      const p = taskProgress(task, months, date)
+                      return (
+                        <div key={task.id}>
+                          <div className="mb-1.5 flex items-baseline justify-between gap-2">
+                            <span className="truncate text-[15px]">{task.title}</span>
+                            <span className="tabular shrink-0 text-[13px] font-semibold" style={{ color }}>
+                              {p.totalCount === 0 ? '—' : `${Math.round(p.ratio * 100)}%`}
+                            </span>
+                          </div>
+                          <div className="h-2 overflow-hidden rounded-full bg-surface">
+                            <div
+                              className="h-full rounded-full"
+                              style={{
+                                width: `${Math.round(p.ratio * 100)}%`,
+                                background: color,
+                                transition: 'width 420ms cubic-bezier(0.32, 0.72, 0, 1)',
+                              }}
+                            />
+                          </div>
+                        </div>
+                      )
+                    })}
                   </div>
-                  <div className="h-2 overflow-hidden rounded-full bg-surface">
-                    <div
-                      className="h-full rounded-full"
-                      style={{
-                        width: `${Math.round(p.ratio * 100)}%`,
-                        background: color,
-                        transition: 'width 420ms cubic-bezier(0.32, 0.72, 0, 1)',
-                      }}
-                    />
-                  </div>
-                </div>
-              )
-            })}
+                )
+              })
+            )}
           </section>
         </>
       )}

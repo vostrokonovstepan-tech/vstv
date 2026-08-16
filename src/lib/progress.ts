@@ -104,12 +104,22 @@ export function longestStreak(tasks: Task[], months: Months, from = today()): nu
   return best
 }
 
+/**
+ * Горизонт для расчёта кольца, если у цели нет дедлайна. Цель — это всегда
+ * долгосрочное дело: без него выполнение сегодняшнего чек-листа выглядело бы
+ * как «цель готова» уже в первый день, ведь знаменатель рос бы вровень
+ * с числителем. 90 дней — то есть закрыть цель одним хорошим днём нельзя,
+ * а через несколько месяцев накопленной истории кольцо и так станет честным
+ * без всякого горизонта.
+ */
+const DEFAULT_RING_HORIZON_DAYS = 90
+
 export type GoalProgress = {
   /**
-   * 0…1 — прогресс кольца. Если у цели есть дедлайн, это доля от ВСЕГО плана
-   * (закрытые задачи / все задачи вплоть до дедлайна, включая ещё не наступившие).
-   * Без дедлайна знаменателя-«всего» не существует — используется доля за
-   * прошедшее время, как раньше.
+   * 0…1 — прогресс кольца относительно ВСЕГО плана: закрытые задачи делённые
+   * на все задачи вплоть до дедлайна (или до условного горизонта, если
+   * дедлайна нет), включая ещё не наступившие. Поэтому кольцо не «закрывается»
+   * сразу же после выполнения сегодняшних задач.
    */
   ratio: number
   /** Закрыто задач — только за прошедшее время, для подписи «X из Y за всё время». */
@@ -139,13 +149,10 @@ export function goalProgress(goal: Goal, tasks: Task[], months: Months, upTo = t
     doneCount += scheduled.filter((t) => doneIds.includes(t.id)).length
   }
 
-  // Кольцо цели считаем не только по прошлому: если есть дедлайн, добавляем
-  // в знаменатель ещё не наступившие задачи вплоть до него. Иначе выполнение
-  // сегодняшнего чек-листа выглядело бы как «цель готова» — знаменатель рос бы
-  // вровень с числителем и застревал на 100% уже в первый день.
   let ringTotal = totalCount
-  if (goal.deadline && goal.deadline > upTo) {
-    const future = Math.min(daysBetween(upTo, goal.deadline), MAX_LOOKBACK_DAYS)
+  const horizonEnd = goal.deadline ?? addDays(goal.createdAt, DEFAULT_RING_HORIZON_DAYS)
+  if (horizonEnd > upTo) {
+    const future = Math.min(daysBetween(upTo, horizonEnd), MAX_LOOKBACK_DAYS)
     for (let i = 1; i <= future; i++) {
       const date = addDays(upTo, i)
       ringTotal += goalTasks.filter((t) => isScheduled(t, date)).length
@@ -159,6 +166,36 @@ export function goalProgress(goal: Goal, tasks: Task[], months: Months, upTo = t
     seconds,
     daysLeft: goal.deadline ? daysBetween(upTo, goal.deadline) : undefined,
   }
+}
+
+export type TaskProgress = {
+  /** 0…1 — доля закрытых выходов задачи за всё время её существования */
+  ratio: number
+  doneCount: number
+  totalCount: number
+}
+
+/**
+ * Статистика по одной задаче — сколько раз из запланированных она закрыта.
+ * В отличие от кольца цели, здесь нет понятия «горизонта»: задача не «закрывается»,
+ * она либо повторяется бесконечно, либо была разовой — оба случая честно
+ * описываются долей выполненного за прошедшее время.
+ */
+export function taskProgress(task: Task, months: Months, upTo = today()): TaskProgress {
+  const span = Math.min(daysBetween(task.createdAt, upTo), MAX_LOOKBACK_DAYS)
+
+  let doneCount = 0
+  let totalCount = 0
+
+  for (let i = 0; i <= Math.max(0, span); i++) {
+    const date = addDays(upTo, -i)
+    if (date < task.createdAt) break
+    if (!isScheduled(task, date)) continue
+    totalCount++
+    if (getDayLog(months, date).d?.includes(task.id)) doneCount++
+  }
+
+  return { ratio: totalCount === 0 ? 0 : doneCount / totalCount, doneCount, totalCount }
 }
 
 /** Секунды по всем целям (или по одной) за загруженную историю. */

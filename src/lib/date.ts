@@ -43,6 +43,19 @@ export function recentMonths(n: number, from = new Date()): string[] {
   return out
 }
 
+/** "2026-08" + 1 → "2026-09"; работает и назад с отрицательным n. */
+export function addMonths(yearMonth: string, n: number): string {
+  const [y, m] = yearMonth.split('-').map(Number)
+  const d = new Date(y, m - 1 + n, 1)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+
+/** Число дней в месяце "2026-08" → 31. */
+export function daysInMonth(yearMonth: string): number {
+  const [y, m] = yearMonth.split('-').map(Number)
+  return new Date(y, m, 0).getDate()
+}
+
 /** 0 = вс … 6 = сб */
 export function weekdayOf(iso: string): number {
   return fromISO(iso).getDay()
@@ -61,6 +74,11 @@ export function daysBetween(a: string, b: string): number {
 const MONTHS_GEN = [
   'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
   'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря',
+]
+
+export const MONTHS_NOM = [
+  'январь', 'февраль', 'март', 'апрель', 'май', 'июнь',
+  'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь',
 ]
 
 const WEEKDAYS_FULL = [

@@ -7,7 +7,7 @@ import { Sheet } from '../components/Sheet'
 import { TaskForm } from '../components/TaskForm'
 import { GoalForm } from '../components/GoalForm'
 import { TaskRow } from '../components/TaskRow'
-import { Heatmap } from '../components/Heatmap'
+import { MonthCalendar } from '../components/MonthCalendar'
 import { Button, EmptyState, SectionTitle } from '../components/ui'
 import { accentColor } from '../lib/accents'
 import { formatHours, plural, today as todayISO } from '../lib/date'
@@ -86,8 +86,8 @@ export function GoalDetail({ goalId, onBack }: { goalId: string; onBack: () => v
       </section>
 
       <section className="card space-y-3 p-4">
-        <SectionTitle>Последние 13 недель</SectionTitle>
-        <Heatmap tasks={goalTasks} months={months} color={color} endDate={date} />
+        <SectionTitle>Календарь</SectionTitle>
+        <MonthCalendar tasks={goalTasks} months={months} color={color} />
       </section>
 
       <Button
