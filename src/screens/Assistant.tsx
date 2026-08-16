@@ -27,9 +27,8 @@ function formatRecTime(s: number): string {
 
 export function Assistant() {
   const store = useStore()
-  const { ai, setAi, goals, tasks, months } = store
+  const { ai, setAi, goals, tasks, months, chatHistory: turns, setChatHistory: setTurns } = store
 
-  const [turns, setTurns] = useState<ChatTurn[]>([])
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
   const [weeklyBusy, setWeeklyBusy] = useState(false)
@@ -72,8 +71,8 @@ export function Assistant() {
       const applied = actions.length > 0 ? store.applyAiActions(actions) : []
       if (applied.length > 0) haptic('success')
 
-      setTurns((prev) => [
-        ...prev,
+      setTurns([
+        ...history,
         {
           id: newId(),
           role: 'assistant',
@@ -84,8 +83,8 @@ export function Assistant() {
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') return
       haptic('warning')
-      setTurns((prev) => [
-        ...prev,
+      setTurns([
+        ...history,
         {
           id: newId(),
           role: 'assistant',
@@ -102,15 +101,16 @@ export function Assistant() {
   const runWeeklyReview = async () => {
     if (weeklyBusy) return
     setWeeklyBusy(true)
-    setTurns((prev) => [...prev, { id: newId(), role: 'user', text: '📊 Разбор недели' }])
+    const withUser = [...turns, { id: newId(), role: 'user' as const, text: '📊 Разбор недели' }]
+    setTurns(withUser)
 
     try {
       const text = await askWeeklyReview(ai, goals, tasks, months)
-      setTurns((prev) => [...prev, { id: newId(), role: 'assistant', text }])
+      setTurns([...withUser, { id: newId(), role: 'assistant', text }])
     } catch (err) {
       haptic('warning')
-      setTurns((prev) => [
-        ...prev,
+      setTurns([
+        ...withUser,
         {
           id: newId(),
           role: 'assistant',

@@ -105,8 +105,14 @@ export function longestStreak(tasks: Task[], months: Months, from = today()): nu
 }
 
 export type GoalProgress = {
-  /** 0…1 — доля закрытых задач за всё время существования цели */
+  /**
+   * 0…1 — прогресс кольца. Если у цели есть дедлайн, это доля от ВСЕГО плана
+   * (закрытые задачи / все задачи вплоть до дедлайна, включая ещё не наступившие).
+   * Без дедлайна знаменателя-«всего» не существует — используется доля за
+   * прошедшее время, как раньше.
+   */
   ratio: number
+  /** Закрыто задач — только за прошедшее время, для подписи «X из Y за всё время». */
   doneCount: number
   totalCount: number
   seconds: number
@@ -133,8 +139,21 @@ export function goalProgress(goal: Goal, tasks: Task[], months: Months, upTo = t
     doneCount += scheduled.filter((t) => doneIds.includes(t.id)).length
   }
 
+  // Кольцо цели считаем не только по прошлому: если есть дедлайн, добавляем
+  // в знаменатель ещё не наступившие задачи вплоть до него. Иначе выполнение
+  // сегодняшнего чек-листа выглядело бы как «цель готова» — знаменатель рос бы
+  // вровень с числителем и застревал на 100% уже в первый день.
+  let ringTotal = totalCount
+  if (goal.deadline && goal.deadline > upTo) {
+    const future = Math.min(daysBetween(upTo, goal.deadline), MAX_LOOKBACK_DAYS)
+    for (let i = 1; i <= future; i++) {
+      const date = addDays(upTo, i)
+      ringTotal += goalTasks.filter((t) => isScheduled(t, date)).length
+    }
+  }
+
   return {
-    ratio: totalCount === 0 ? 0 : doneCount / totalCount,
+    ratio: ringTotal === 0 ? 0 : doneCount / ringTotal,
     doneCount,
     totalCount,
     seconds,

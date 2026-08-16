@@ -11,8 +11,9 @@ import {
 import type { AccentKey, DayLog, Goal, MonthLog, RunningTimer, Task } from './types'
 import { dayOf, monthOf, recentMonths, today } from './lib/date'
 import { DEFAULT_AI, type AiSettings } from './lib/ai'
-import type { Action } from './lib/aiChat'
+import type { Action, ChatTurn } from './lib/aiChat'
 import {
+  MAX_VALUE_LENGTH,
   flushAll,
   getMany,
   parseJSON,
@@ -25,6 +26,7 @@ const K_GOALS = 'v1_goals'
 const K_TASKS = 'v1_tasks'
 const K_TIMER = 'v1_timer'
 const K_AI = 'v1_ai'
+const K_CHAT = 'v1_chat'
 const monthKey = (m: string) => `v1_m_${m}`
 
 /** Сколько месяцев истории поднимаем при старте — хватает на серии и годовой график. */
@@ -58,6 +60,8 @@ export type Store = {
   timer: RunningTimer | null
   ai: AiSettings
   setAi: (next: AiSettings) => void
+  chatHistory: ChatTurn[]
+  setChatHistory: (next: ChatTurn[]) => void
 
   dayLog: (date: string) => DayLog
   isDone: (date: string, taskId: string) => boolean
@@ -90,6 +94,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [months, setMonths] = useState<Record<string, MonthLog>>({})
   const [timer, setTimer] = useState<RunningTimer | null>(null)
   const [ai, setAiState] = useState<AiSettings>(DEFAULT_AI)
+  const [chatHistory, setChatHistoryState] = useState<ChatTurn[]>([])
 
   // Пишем в хранилище только после первой загрузки, иначе стартовый
   // пустой стейт затрёт то, что уже лежит в облаке.
@@ -104,7 +109,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false
     const months12 = recentMonths(HISTORY_MONTHS)
-    const keys = [K_GOALS, K_TASKS, K_TIMER, K_AI, ...months12.map(monthKey)]
+    const keys = [K_GOALS, K_TASKS, K_TIMER, K_AI, K_CHAT, ...months12.map(monthKey)]
 
     getMany(keys)
       .then((values) => {
@@ -115,6 +120,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         // Слитые настройки с дефолтами: у ранних пользователей ключа ещё нет,
         // а новые поля не должны приезжать как undefined.
         setAiState({ ...DEFAULT_AI, ...parseJSON<Partial<AiSettings>>(values[K_AI], {}) })
+        setChatHistoryState(parseJSON<ChatTurn[]>(values[K_CHAT], []))
         const loadedMonths: Record<string, MonthLog> = {}
         for (const m of months12) {
           loadedMonths[m] = parseJSON<MonthLog>(values[monthKey(m)], {})
@@ -161,6 +167,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setAiState(next)
     // Ключ пишем сразу: пользователь ждёт результата проверки соединения.
     if (loaded.current) queueWrite(K_AI, JSON.stringify(next), 0)
+  }, [])
+
+  const setChatHistory = useCallback((next: ChatTurn[]) => {
+    // Значение CloudStorage ограничено 4 КБ — храним только тот хвост
+    // истории, что туда влезает, отбрасывая старые реплики по одной.
+    let trimmed = next
+    while (trimmed.length > 0 && JSON.stringify(trimmed).length > MAX_VALUE_LENGTH) {
+      trimmed = trimmed.slice(1)
+    }
+    setChatHistoryState(next)
+    if (loaded.current) queueWrite(K_CHAT, JSON.stringify(trimmed))
   }, [])
 
   /**
@@ -368,6 +385,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       timer,
       ai,
       setAi,
+      chatHistory,
+      setChatHistory,
       dayLog,
       isDone,
       addGoal,
@@ -383,7 +402,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       applyAiActions,
     }),
     [
-      ready, error, goals, tasks, months, timer, ai, setAi, dayLog, isDone,
+      ready, error, goals, tasks, months, timer, ai, setAi, chatHistory, setChatHistory, dayLog, isDone,
       addGoal, updateGoal, removeGoal, addTask, updateTask, removeTask,
       toggleTask, addSeconds, startTimer, stopTimer, applyAiActions,
     ],
