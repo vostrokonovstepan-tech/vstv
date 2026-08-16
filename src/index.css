@@ -1,0 +1,162 @@
+@import 'tailwindcss';
+
+/*
+  Палитра приходит из Telegram (themeParams → CSS-переменные в lib/telegram.ts).
+  Значения ниже — фолбэк для обычного браузера при разработке.
+*/
+:root {
+  --tg-bg: #ffffff;
+  --tg-text: #0f0f0f;
+  --tg-hint: #8b8e93;
+  --tg-link: #3390ec;
+  --tg-accent: #3390ec;
+  --tg-accent-text: #ffffff;
+  --tg-surface: #f2f2f7;
+  --tg-section: #ffffff;
+  --tg-separator: #e6e6ea;
+  --tg-destructive: #e53935;
+}
+
+:root[data-scheme='dark'] {
+  --tg-bg: #17212b;
+  --tg-text: #f5f5f5;
+  --tg-hint: #869099;
+  --tg-link: #6ab3f3;
+  --tg-accent: #5288c1;
+  --tg-accent-text: #ffffff;
+  --tg-surface: #232e3c;
+  --tg-section: #232e3c;
+  --tg-separator: #2f3b48;
+  --tg-destructive: #ec3942;
+}
+
+/*
+  Telegram даёт два фоновых цвета, но какой из них светлее — зависит от темы.
+  Раскладываем их по ролям вручную, иначе в светлой теме белые карточки
+  сливаются с белым фоном, а в тёмной — наоборот.
+*/
+:root {
+  --page: var(--tg-surface);
+  --card: var(--tg-bg);
+  --inset: var(--tg-surface);
+}
+
+:root[data-scheme='dark'] {
+  --page: var(--tg-bg);
+  --card: var(--tg-surface);
+  --inset: var(--tg-bg);
+}
+
+@theme {
+  --color-bg: var(--page);
+  --color-surface: var(--inset);
+  --color-card: var(--card);
+  --color-ink: var(--tg-text);
+  --color-hint: var(--tg-hint);
+  --color-accent: var(--tg-accent);
+  --color-accent-ink: var(--tg-accent-text);
+  --color-line: var(--tg-separator);
+  --color-danger: var(--tg-destructive);
+
+  --font-sans:
+    ui-rounded, -apple-system, BlinkMacSystemFont, 'SF Pro Rounded', 'Segoe UI',
+    Roboto, 'Helvetica Neue', system-ui, sans-serif;
+
+  --radius-card: 1.125rem;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  /* мини-ап — не документ: тянущийся скролл и выделение только мешают */
+  overscroll-behavior-y: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+}
+
+/* Целые числа в статистике не должны «прыгать» при тике таймера. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+@utility card {
+  background: var(--color-card);
+  border-radius: var(--radius-card);
+}
+
+/* Тактильный отклик на тап — заметно оживляет интерфейс на телефоне. */
+@utility press {
+  transition: transform 120ms ease, opacity 120ms ease;
+
+  &:active {
+    transform: scale(0.97);
+    opacity: 0.9;
+  }
+}
+
+@utility safe-bottom {
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + var(--tw-safe-extra, 0px));
+}
+
+@keyframes sheet-in {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes pop {
+  0% {
+    transform: scale(1);
+  }
+  45% {
+    transform: scale(1.18);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.animate-sheet-in {
+  animation: sheet-in 260ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.animate-fade-in {
+  animation: fade-in 180ms ease-out;
+}
+
+.animate-pop {
+  animation: pop 320ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-sheet-in,
+  .animate-fade-in,
+  .animate-pop {
+    animation: none;
+  }
+}
