@@ -10,8 +10,8 @@ import { TaskRow } from '../components/TaskRow'
 import { Heatmap } from '../components/Heatmap'
 import { Button, EmptyState, SectionTitle } from '../components/ui'
 import { accentColor } from '../lib/accents'
-import { WEEKDAYS_SHORT, formatHours, plural, shortWeekdayIndex, today as todayISO } from '../lib/date'
-import { currentStreak, goalProgress } from '../lib/progress'
+import { formatHours, plural, today as todayISO } from '../lib/date'
+import { currentStreak, goalProgress, scheduleLabel } from '../lib/progress'
 import { bindBackButton, haptic } from '../lib/telegram'
 
 export function GoalDetail({ goalId, onBack }: { goalId: string; onBack: () => void }) {
@@ -102,7 +102,7 @@ export function GoalDetail({ goalId, onBack }: { goalId: string; onBack: () => v
       </Button>
 
       <section>
-        <SectionTitle>Ежедневные задачи</SectionTitle>
+        <SectionTitle>Задачи</SectionTitle>
         {goalTasks.length === 0 ? (
           <div className="card">
             <EmptyState
@@ -123,13 +123,10 @@ export function GoalDetail({ goalId, onBack }: { goalId: string; onBack: () => v
                   onToggle={() => store.toggleTask(date, task.id)}
                   onEdit={() => setTaskSheet({ task })}
                 />
-                {task.days.length > 0 && (
+                {scheduleLabel(task) && (
                   <div className="px-4 pb-2.5 -mt-1.5 pl-14 text-[12px] text-hint">
-                    {task.days
-                      .slice()
-                      .sort((a, b) => shortWeekdayIndex(a) - shortWeekdayIndex(b))
-                      .map((d) => WEEKDAYS_SHORT[shortWeekdayIndex(d)])
-                      .join(', ')}
+                    {task.date && '📅 '}
+                    {scheduleLabel(task)}
                   </div>
                 )}
               </div>

@@ -40,6 +40,8 @@ export type TaskInput = {
   goalId: string
   title: string
   days: number[]
+  /** Задана — задача разовая, на эту дату. undefined стирает дату при сохранении. */
+  date?: string
 }
 
 export type Store = {

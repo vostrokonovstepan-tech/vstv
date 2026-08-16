@@ -1,5 +1,15 @@
 import type { DayLog, Goal, MonthLog, Task } from '../types'
-import { addDays, dayOf, daysBetween, monthOf, today, weekdayOf } from './date'
+import {
+  WEEKDAYS_SHORT,
+  addDays,
+  dayOf,
+  daysBetween,
+  formatDayMonth,
+  monthOf,
+  shortWeekdayIndex,
+  today,
+  weekdayOf,
+} from './date'
 
 /** Дальше этого в прошлое не считаем — истории всё равно столько не загружено. */
 const MAX_LOOKBACK_DAYS = 366
@@ -10,11 +20,28 @@ export function getDayLog(months: Months, date: string): DayLog {
   return months[monthOf(date)]?.[dayOf(date)] ?? {}
 }
 
-/** Задача запланирована на этот день недели? Пустой days = каждый день. */
+/** Задача запланирована на этот день? Пустой days = каждый день. */
 export function isScheduled(task: Task, date: string): boolean {
   if (task.archived) return false
+  // Разовая задача живёт ровно один день. На createdAt не смотрим намеренно:
+  // дату можно поставить и задним числом, чтобы отметить уже сделанное.
+  if (task.date) return task.date === date
   if (date < task.createdAt) return false
   return task.days.length === 0 || task.days.includes(weekdayOf(date))
+}
+
+/**
+ * Подпись расписания под задачей: «16 августа» для разовой,
+ * «пн, ср, пт» для выборочных дней, null для ежедневной — там подпись лишняя.
+ */
+export function scheduleLabel(task: Task): string | null {
+  if (task.date) return formatDayMonth(task.date)
+  if (task.days.length === 0) return null
+  return task.days
+    .slice()
+    .sort((a, b) => shortWeekdayIndex(a) - shortWeekdayIndex(b))
+    .map((d) => WEEKDAYS_SHORT[shortWeekdayIndex(d)])
+    .join(', ')
 }
 
 export function tasksForDate(tasks: Task[], date: string): Task[] {

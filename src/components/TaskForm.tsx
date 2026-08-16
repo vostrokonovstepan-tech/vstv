@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import type { Goal, Task } from '../types'
 import { accentColor } from '../lib/accents'
-import { WEEKDAYS_SHORT } from '../lib/date'
+import { WEEKDAYS_SHORT, formatDayMonth, today } from '../lib/date'
 import { Button, Field, TextInput } from './ui'
 import { confirmDialog } from '../lib/telegram'
 
@@ -12,20 +12,25 @@ type Props = {
   goals: Goal[]
   task?: Task
   defaultGoalId?: string
-  onSave: (data: { goalId: string; title: string; days: number[] }) => void
+  onSave: (data: { goalId: string; title: string; days: number[]; date?: string }) => void
   onDelete?: () => void
   onClose: () => void
 }
+
+type Mode = 'repeat' | 'once'
 
 export function TaskForm({ goals, task, defaultGoalId, onSave, onDelete, onClose }: Props) {
   const [title, setTitle] = useState(task?.title ?? '')
   const [goalId, setGoalId] = useState(task?.goalId ?? defaultGoalId ?? goals[0]?.id ?? '')
   const [days, setDays] = useState<number[]>(task?.days ?? [])
+  const [mode, setMode] = useState<Mode>(task?.date ? 'once' : 'repeat')
+  const [date, setDate] = useState(task?.date ?? today())
 
   const trimmed = title.trim()
   const goal = goals.find((g) => g.id === goalId)
   const color = accentColor(goal?.accent)
   const everyDay = days.length === 0
+  const valid = Boolean(trimmed) && Boolean(goalId) && (mode === 'repeat' || Boolean(date))
 
   const toggleDay = (value: number) => {
     setDays((prev) => {
@@ -36,8 +41,14 @@ export function TaskForm({ goals, task, defaultGoalId, onSave, onDelete, onClose
   }
 
   const submit = () => {
-    if (!trimmed || !goalId) return
-    onSave({ goalId, title: trimmed, days })
+    if (!valid) return
+    onSave({
+      goalId,
+      title: trimmed,
+      days: mode === 'once' ? [] : days,
+      // undefined важен: при переключении обратно на повтор он стирает дату.
+      date: mode === 'once' ? date : undefined,
+    })
     onClose()
   }
 
@@ -85,32 +96,70 @@ export function TaskForm({ goals, task, defaultGoalId, onSave, onDelete, onClose
       )}
 
       <Field label="Когда">
-        <div className="flex gap-1.5">
-          {WEEKDAY_VALUES.map((value, i) => {
-            const active = everyDay || days.includes(value)
-            return (
-              <button
-                key={value}
-                type="button"
-                onClick={() => toggleDay(value)}
-                className="press flex-1 rounded-xl py-2.5 text-[13px] font-medium capitalize"
-                style={
-                  active
-                    ? { background: color, color: '#fff' }
-                    : { background: 'var(--color-surface)', color: 'var(--color-hint)' }
-                }
-              >
-                {WEEKDAYS_SHORT[i]}
-              </button>
-            )
-          })}
+        <div className="mb-3 flex gap-1.5 rounded-2xl bg-surface p-1">
+          {(
+            [
+              ['repeat', 'Повторять'],
+              ['once', 'Один раз'],
+            ] as const
+          ).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setMode(key)}
+              className="press flex-1 rounded-xl py-2 text-[14px] font-medium"
+              style={
+                mode === key
+                  ? { background: color, color: '#fff' }
+                  : { color: 'var(--color-hint)' }
+              }
+            >
+              {label}
+            </button>
+          ))}
         </div>
-        <p className="mt-2 px-1 text-[13px] text-hint">
-          {everyDay ? 'Каждый день' : `${days.length} ${days.length === 1 ? 'день' : 'дн.'} в неделю`}
-        </p>
+
+        {mode === 'repeat' ? (
+          <>
+            <div className="flex gap-1.5">
+              {WEEKDAY_VALUES.map((value, i) => {
+                const active = everyDay || days.includes(value)
+                return (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => toggleDay(value)}
+                    className="press flex-1 rounded-xl py-2.5 text-[13px] font-medium capitalize"
+                    style={
+                      active
+                        ? { background: color, color: '#fff' }
+                        : { background: 'var(--color-surface)', color: 'var(--color-hint)' }
+                    }
+                  >
+                    {WEEKDAYS_SHORT[i]}
+                  </button>
+                )
+              })}
+            </div>
+            <p className="mt-2 px-1 text-[13px] text-hint">
+              {everyDay
+                ? 'Каждый день'
+                : `${days.length} ${days.length === 1 ? 'день' : 'дн.'} в неделю`}
+            </p>
+          </>
+        ) : (
+          <>
+            <TextInput type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+            <p className="mt-2 px-1 text-[13px] text-hint">
+              {date
+                ? `Появится один раз — ${formatDayMonth(date)}`
+                : 'Выбери дату, когда нужно это сделать'}
+            </p>
+          </>
+        )}
       </Field>
 
-      <Button onClick={submit} disabled={!trimmed || !goalId} accent={color}>
+      <Button onClick={submit} disabled={!valid} accent={color}>
         {task ? 'Сохранить' : 'Добавить задачу'}
       </Button>
 
