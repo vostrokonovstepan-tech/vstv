@@ -1,8 +1,11 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { useStore } from '../store'
 import { Screen, ScreenHeader } from '../components/Screen'
 import { Heatmap } from '../components/Heatmap'
+import { Sheet } from '../components/Sheet'
+import { AiSettingsForm } from '../components/AiSettingsForm'
 import { EmptyState, SectionTitle } from '../components/ui'
+import { aiConfigured } from '../lib/ai'
 import { accentColor } from '../lib/accents'
 import {
   WEEKDAYS_SHORT,
@@ -18,9 +21,10 @@ import { telegramUser } from '../lib/telegram'
 const CHART_DAYS = 14
 
 export function Profile() {
-  const { goals, tasks, months } = useStore()
+  const { goals, tasks, months, ai, setAi } = useStore()
   const date = todayISO()
   const user = telegramUser()
+  const [aiSheet, setAiSheet] = useState(false)
 
   const streak = useMemo(() => currentStreak(tasks, months, date), [tasks, months, date])
   const best = useMemo(() => longestStreak(tasks, months, date), [tasks, months, date])
@@ -131,6 +135,30 @@ export function Profile() {
           </section>
         </>
       )}
+
+      <section>
+        <SectionTitle>Настройки</SectionTitle>
+        <button
+          type="button"
+          onClick={() => setAiSheet(true)}
+          className="press card flex w-full items-center gap-3 p-4 text-left"
+        >
+          <span className="text-[22px]">✨</span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-[15px] font-medium">Помощник</span>
+            <span className="block truncate text-[13px] text-hint">
+              {aiConfigured(ai) ? ai.model : 'Не подключён'}
+            </span>
+          </span>
+          <svg viewBox="0 0 24 24" className="size-5 shrink-0 text-hint" fill="none" stroke="currentColor" strokeWidth={2}>
+            <path d="m9 5 7 7-7 7" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+      </section>
+
+      <Sheet open={aiSheet} title="Помощник" onClose={() => setAiSheet(false)}>
+        <AiSettingsForm value={ai} onSave={setAi} onClose={() => setAiSheet(false)} />
+      </Sheet>
     </Screen>
   )
 }

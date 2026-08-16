@@ -10,6 +10,7 @@ import {
 } from 'react'
 import type { AccentKey, DayLog, Goal, MonthLog, RunningTimer, Task } from './types'
 import { dayOf, monthOf, recentMonths, today } from './lib/date'
+import { DEFAULT_AI, type AiSettings } from './lib/ai'
 import {
   flushAll,
   getMany,
@@ -22,6 +23,7 @@ import {
 const K_GOALS = 'v1_goals'
 const K_TASKS = 'v1_tasks'
 const K_TIMER = 'v1_timer'
+const K_AI = 'v1_ai'
 const monthKey = (m: string) => `v1_m_${m}`
 
 /** Сколько месяцев истории поднимаем при старте — хватает на серии и годовой график. */
@@ -53,6 +55,8 @@ export type Store = {
   tasks: Task[]
   months: Record<string, MonthLog>
   timer: RunningTimer | null
+  ai: AiSettings
+  setAi: (next: AiSettings) => void
 
   dayLog: (date: string) => DayLog
   isDone: (date: string, taskId: string) => boolean
@@ -81,6 +85,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [tasks, setTasks] = useState<Task[]>([])
   const [months, setMonths] = useState<Record<string, MonthLog>>({})
   const [timer, setTimer] = useState<RunningTimer | null>(null)
+  const [ai, setAiState] = useState<AiSettings>(DEFAULT_AI)
 
   // Пишем в хранилище только после первой загрузки, иначе стартовый
   // пустой стейт затрёт то, что уже лежит в облаке.
@@ -95,7 +100,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false
     const months12 = recentMonths(HISTORY_MONTHS)
-    const keys = [K_GOALS, K_TASKS, K_TIMER, ...months12.map(monthKey)]
+    const keys = [K_GOALS, K_TASKS, K_TIMER, K_AI, ...months12.map(monthKey)]
 
     getMany(keys)
       .then((values) => {
@@ -103,6 +108,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         setGoals(parseJSON<Goal[]>(values[K_GOALS], []))
         setTasks(parseJSON<Task[]>(values[K_TASKS], []))
         setTimer(parseJSON<RunningTimer | null>(values[K_TIMER], null))
+        // Слитые настройки с дефолтами: у ранних пользователей ключа ещё нет,
+        // а новые поля не должны приезжать как undefined.
+        setAiState({ ...DEFAULT_AI, ...parseJSON<Partial<AiSettings>>(values[K_AI], {}) })
         const loadedMonths: Record<string, MonthLog> = {}
         for (const m of months12) {
           loadedMonths[m] = parseJSON<MonthLog>(values[monthKey(m)], {})
@@ -143,6 +151,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const persistTasks = useCallback((next: Task[]) => {
     setTasks(next)
     if (loaded.current) queueWrite(K_TASKS, JSON.stringify(next))
+  }, [])
+
+  const setAi = useCallback((next: AiSettings) => {
+    setAiState(next)
+    // Ключ пишем сразу: пользователь ждёт результата проверки соединения.
+    if (loaded.current) queueWrite(K_AI, JSON.stringify(next), 0)
   }, [])
 
   /**
@@ -283,6 +297,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       tasks,
       months,
       timer,
+      ai,
+      setAi,
       dayLog,
       isDone,
       addGoal,
@@ -297,7 +313,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       stopTimer,
     }),
     [
-      ready, error, goals, tasks, months, timer, dayLog, isDone,
+      ready, error, goals, tasks, months, timer, ai, setAi, dayLog, isDone,
       addGoal, updateGoal, removeGoal, addTask, updateTask, removeTask,
       toggleTask, addSeconds, startTimer, stopTimer,
     ],
