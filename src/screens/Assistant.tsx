@@ -27,7 +27,7 @@ function formatRecTime(s: number): string {
 
 export function Assistant() {
   const store = useStore()
-  const { ai, setAi, goals, tasks, months, chatHistory: turns, setChatHistory: setTurns } = store
+  const { ai, setAi, goals, tasks, months, notes, chatHistory: turns, setChatHistory: setTurns } = store
 
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
@@ -105,7 +105,7 @@ export function Assistant() {
     setTurns(withUser)
 
     try {
-      const text = await askWeeklyReview(ai, goals, tasks, months)
+      const text = await askWeeklyReview(ai, goals, tasks, months, notes)
       setTurns([...withUser, { id: newId(), role: 'assistant', text }])
     } catch (err) {
       haptic('warning')

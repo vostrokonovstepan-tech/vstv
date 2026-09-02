@@ -28,6 +28,15 @@ const K_TIMER = 'v1_timer'
 const K_AI = 'v1_ai'
 const K_CHAT = 'v1_chat'
 const monthKey = (m: string) => `v1_m_${m}`
+/**
+ * Заметки дня хранятся отдельным ключом от чек-листа и секунд намеренно:
+ * если бы они лежали в одном значении, длинная заметка за один день могла бы
+ * упереться в 4-килобайтный лимит CloudStorage и не сохранить заодно и отметки
+ * о выполнении задач за весь месяц.
+ */
+const noteMonthKey = (m: string) => `v1_n_${m}`
+/** Хвост дня в заметке — оставляет запас, чтобы месяц из ~30 дней влезал в 4 КБ. */
+export const NOTE_MAX_LENGTH = 500
 
 /** Сколько месяцев истории поднимаем при старте — хватает на серии и годовой график. */
 const HISTORY_MONTHS = 12
@@ -66,6 +75,10 @@ export type Store = {
   dayLog: (date: string) => DayLog
   isDone: (date: string, taskId: string) => boolean
 
+  notes: Record<string, Record<string, string>>
+  getNote: (date: string) => string
+  setNote: (date: string, text: string) => void
+
   addGoal: (input: GoalInput) => Goal
   updateGoal: (id: string, patch: Partial<Goal>) => void
   removeGoal: (id: string) => void
@@ -95,6 +108,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [timer, setTimer] = useState<RunningTimer | null>(null)
   const [ai, setAiState] = useState<AiSettings>(DEFAULT_AI)
   const [chatHistory, setChatHistoryState] = useState<ChatTurn[]>([])
+  const [notes, setNotes] = useState<Record<string, Record<string, string>>>({})
 
   // Пишем в хранилище только после первой загрузки, иначе стартовый
   // пустой стейт затрёт то, что уже лежит в облаке.
@@ -109,7 +123,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false
     const months12 = recentMonths(HISTORY_MONTHS)
-    const keys = [K_GOALS, K_TASKS, K_TIMER, K_AI, K_CHAT, ...months12.map(monthKey)]
+    const keys = [
+      K_GOALS, K_TASKS, K_TIMER, K_AI, K_CHAT,
+      ...months12.map(monthKey), ...months12.map(noteMonthKey),
+    ]
 
     getMany(keys)
       .then((values) => {
@@ -122,10 +139,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         setAiState({ ...DEFAULT_AI, ...parseJSON<Partial<AiSettings>>(values[K_AI], {}) })
         setChatHistoryState(parseJSON<ChatTurn[]>(values[K_CHAT], []))
         const loadedMonths: Record<string, MonthLog> = {}
+        const loadedNotes: Record<string, Record<string, string>> = {}
         for (const m of months12) {
           loadedMonths[m] = parseJSON<MonthLog>(values[monthKey(m)], {})
+          loadedNotes[m] = parseJSON<Record<string, string>>(values[noteMonthKey(m)], {})
         }
         setMonths(loadedMonths)
+        setNotes(loadedNotes)
       })
       .catch((err: unknown) => {
         if (cancelled) return
@@ -210,6 +230,34 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
     dirtyMonths.current.clear()
   }, [months])
+
+  const dirtyNoteMonths = useRef(new Set<string>())
+
+  const getNote = useCallback(
+    (date: string): string => notes[monthOf(date)]?.[dayOf(date)] ?? '',
+    [notes],
+  )
+
+  const setNote = useCallback((date: string, text: string) => {
+    const m = monthOf(date)
+    const d = dayOf(date)
+    const trimmed = text.trim().slice(0, NOTE_MAX_LENGTH)
+    dirtyNoteMonths.current.add(m)
+    setNotes((prev) => {
+      const month = { ...(prev[m] ?? {}) }
+      if (trimmed) month[d] = trimmed
+      else delete month[d]
+      return { ...prev, [m]: month }
+    })
+  }, [])
+
+  useEffect(() => {
+    if (!loaded.current || dirtyNoteMonths.current.size === 0) return
+    for (const m of dirtyNoteMonths.current) {
+      queueWrite(noteMonthKey(m), JSON.stringify(notes[m] ?? {}))
+    }
+    dirtyNoteMonths.current.clear()
+  }, [notes])
 
   const dayLog = useCallback(
     (date: string): DayLog => months[monthOf(date)]?.[dayOf(date)] ?? {},
@@ -389,6 +437,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setChatHistory,
       dayLog,
       isDone,
+      notes,
+      getNote,
+      setNote,
       addGoal,
       updateGoal,
       removeGoal,
@@ -403,6 +454,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }),
     [
       ready, error, goals, tasks, months, timer, ai, setAi, chatHistory, setChatHistory, dayLog, isDone,
+      notes, getNote, setNote,
       addGoal, updateGoal, removeGoal, addTask, updateTask, removeTask,
       toggleTask, addSeconds, startTimer, stopTimer, applyAiActions,
     ],

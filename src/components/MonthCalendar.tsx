@@ -1,19 +1,9 @@
-import { useMemo, useState } from 'react'
 import type { Months } from '../lib/progress'
 import { dayStats } from '../lib/progress'
 import type { Task } from '../types'
-import {
-  MONTHS_NOM,
-  addMonths,
-  daysInMonth,
-  monthOf,
-  shortWeekdayIndex,
-  today as todayISO,
-  weekdayOf,
-} from '../lib/date'
-import { haptic } from '../lib/telegram'
-
-type Cell = { date: string } | null
+import { today as todayISO } from '../lib/date'
+import { useMonthGrid } from '../lib/useMonthGrid'
+import { MonthNav } from './MonthNav'
 
 type Props = {
   tasks: Task[]
@@ -27,58 +17,11 @@ type Props = {
  */
 export function MonthCalendar({ tasks, months, color }: Props) {
   const todayDate = todayISO()
-  const currentMonth = monthOf(todayDate)
-  const [cursor, setCursor] = useState(currentMonth)
-
-  const grid = useMemo(() => {
-    const lead = shortWeekdayIndex(weekdayOf(`${cursor}-01`))
-    const total = daysInMonth(cursor)
-
-    const cells: Cell[] = Array.from({ length: lead }, () => null)
-    for (let d = 1; d <= total; d++) {
-      cells.push({ date: `${cursor}-${String(d).padStart(2, '0')}` })
-    }
-    while (cells.length % 7 !== 0) cells.push(null)
-    return cells
-  }, [cursor])
-
-  const [y, m] = cursor.split('-').map(Number)
-  const atCurrentMonth = cursor >= currentMonth
+  const { cursor, setCursor, grid, atCurrentMonth } = useMonthGrid()
 
   return (
     <div>
-      <div className="mb-3 flex items-center justify-between">
-        <button
-          type="button"
-          onClick={() => {
-            haptic('select')
-            setCursor((c) => addMonths(c, -1))
-          }}
-          aria-label="Предыдущий месяц"
-          className="press grid size-8 place-items-center rounded-full text-hint"
-        >
-          <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth={2.2}>
-            <path d="m15 5-7 7 7 7" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </button>
-        <span className="text-[14px] font-medium capitalize">
-          {MONTHS_NOM[m - 1]} {y}
-        </span>
-        <button
-          type="button"
-          onClick={() => {
-            haptic('select')
-            setCursor((c) => addMonths(c, 1))
-          }}
-          disabled={atCurrentMonth}
-          aria-label="Следующий месяц"
-          className="press grid size-8 place-items-center rounded-full text-hint disabled:opacity-30"
-        >
-          <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth={2.2}>
-            <path d="m9 5 7 7-7 7" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </button>
-      </div>
+      <MonthNav cursor={cursor} onChange={setCursor} atCurrentMonth={atCurrentMonth} />
 
       <div className="grid grid-cols-7 gap-1">
         {grid.map((cell, i) => {

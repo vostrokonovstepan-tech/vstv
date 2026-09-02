@@ -7,6 +7,7 @@ import { Goals } from './screens/Goals'
 import { GoalDetail } from './screens/GoalDetail'
 import { Assistant } from './screens/Assistant'
 import { Profile } from './screens/Profile'
+import { Notes } from './screens/Notes'
 import { bindTheme, initViewport } from './lib/telegram'
 
 export default function App() {
@@ -65,6 +66,8 @@ function Router() {
         <Goals onOpen={setOpenGoalId} />
       ) : tab === 'assistant' ? (
         <Assistant />
+      ) : tab === 'notes' ? (
+        <Notes />
       ) : (
         <Profile />
       )}
