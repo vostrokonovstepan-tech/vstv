@@ -1,5 +1,6 @@
 import { chat, type AiSettings } from './ai'
-import { addDays, dayOf, formatDayMonth, formatHours, monthOf, plural, today } from './date'
+import { formatHours, plural, today } from './date'
+import { recentNotesText, type NotesStore } from './notes'
 import { currentStreak, daySeries, type Months } from './progress'
 import type { Goal, Task } from '../types'
 
@@ -43,23 +44,12 @@ function goalWeekSummary(goal: Goal, tasks: Task[], months: Months): string | nu
   return parts.join(', ')
 }
 
-/** Заметки за последние `days` дней, от старых к новым — то, что реально писал пользователь. */
-function recentNotesText(notes: Record<string, Record<string, string>>, days = 7): string | null {
-  const lines: string[] = []
-  for (let i = days - 1; i >= 0; i--) {
-    const date = addDays(today(), -i)
-    const text = notes[monthOf(date)]?.[dayOf(date)]
-    if (text) lines.push(`${formatDayMonth(date)}: ${text}`)
-  }
-  return lines.length > 0 ? lines.join('\n') : null
-}
-
 export async function askWeeklyReview(
   settings: AiSettings,
   goals: Goal[],
   tasks: Task[],
   months: Months,
-  notes: Record<string, Record<string, string>>,
+  notes: NotesStore,
 ): Promise<string> {
   const statLines = goals
     .map((g) => goalWeekSummary(g, tasks, months))
@@ -70,7 +60,7 @@ export async function askWeeklyReview(
       ? statLines.join('\n')
       : 'За последнюю неделю нет ни одной отметки о выполнении и потраченном времени.'
 
-  const notesText = recentNotesText(notes)
+  const notesText = recentNotesText(notes, 7)
 
   const body = notesText
     ? `Цифры по целям:\n${stats}\n\nЗаметки пользователя за неделю:\n${notesText}`

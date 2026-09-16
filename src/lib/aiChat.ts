@@ -1,6 +1,7 @@
 import { AiError, chat, extractJSON, type AiSettings, type ChatMessage } from './ai'
 import { ACCENT_KEYS } from './accents'
 import { formatFullDate, today } from './date'
+import { recentNotesText, type NotesStore } from './notes'
 import type { AccentKey, Goal, Task } from '../types'
 
 /**
@@ -44,6 +45,10 @@ const SYSTEM = `Ты — помощник внутри трекера целей
   или разовая на конкретную дату.
 - Хорошая задача конкретна и измерима: не «заниматься английским», а «30 слов в Anki».
   Выполняется за один подход, формулируется коротко, до 60 символов, без точки в конце.
+- В календаре пользователь может каждый день писать заметку своими словами — что
+  полезного сделал. Тебе присылают заметки за последние две недели, если они есть.
+  Используй их, когда пользователь спрашивает о своём прогрессе, а не только цифры
+  выполнения задач: заметки показывают, было ли сделанное осмысленным.
 
 Ты можешь выполнять действия:
 - {"type":"create_goal","title":"...","emoji":"🎯","accent":"indigo","deadline":"2026-06-01"}
@@ -136,18 +141,30 @@ function sanitize(raw: unknown): AssistantReply {
 /** Сколько прошлых реплик отправляем обратно — держим контекст маленьким и дешёвым. */
 const HISTORY_TURNS = 8
 
+/** Сколько дней заметок подаём в чат — больше, чем в недельном разборе: здесь можно спросить и про позапрошлую неделю. */
+const NOTES_DAYS = 14
+
 export async function askAssistant(
   settings: AiSettings,
   history: ChatTurn[],
   goals: Goal[],
   tasks: Task[],
+  notes: NotesStore,
   signal?: AbortSignal,
 ): Promise<AssistantReply> {
+  const notesText = recentNotesText(notes, NOTES_DAYS)
+
   const messages: ChatMessage[] = [
     { role: 'system', content: SYSTEM },
     {
       role: 'system',
       content: `Сегодня ${formatFullDate(today())} (${today()}).\n${stateSummary(goals, tasks)}`,
+    },
+    {
+      role: 'system',
+      content: notesText
+        ? `Заметки пользователя за последние ${NOTES_DAYS} дней:\n${notesText}`
+        : `Заметок за последние ${NOTES_DAYS} дней пользователь не писал.`,
     },
     ...history.slice(-HISTORY_TURNS).map(
       (t): ChatMessage => ({

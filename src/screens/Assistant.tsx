@@ -66,6 +66,7 @@ export function Assistant() {
         history,
         goals,
         tasks,
+        notes,
         controller.signal,
       )
       const applied = actions.length > 0 ? store.applyAiActions(actions) : []
