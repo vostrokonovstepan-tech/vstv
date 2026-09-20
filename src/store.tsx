@@ -12,6 +12,9 @@ import type { AccentKey, DayLog, Goal, MonthLog, RunningTimer, Task } from './ty
 import { dayOf, monthOf, recentMonths, today } from './lib/date'
 import { DEFAULT_AI, type AiSettings } from './lib/ai'
 import type { Action, ChatTurn } from './lib/aiChat'
+import { MAX_CHUNKS, chunkKey, chunkKeys, packChunks } from './lib/chunks'
+import { scheduleLabel } from './lib/progress'
+import { sameSchedule } from './lib/schedule'
 import {
   MAX_VALUE_LENGTH,
   flushAll,
@@ -56,6 +59,9 @@ export type TaskInput = {
   days: number[]
   /** Задана — задача разовая, на эту дату. undefined стирает дату при сохранении. */
   date?: string
+  /** «HH:MM». undefined стирает время — задача снова без времени. */
+  time?: string
+  duration?: number
 }
 
 export type Store = {
@@ -124,7 +130,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     let cancelled = false
     const months12 = recentMonths(HISTORY_MONTHS)
     const keys = [
-      K_GOALS, K_TASKS, K_TIMER, K_AI, K_CHAT,
+      K_GOALS, ...chunkKeys(K_TASKS), K_TIMER, K_AI, K_CHAT,
       ...months12.map(monthKey), ...months12.map(noteMonthKey),
     ]
 
@@ -132,7 +138,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       .then((values) => {
         if (cancelled) return
         setGoals(parseJSON<Goal[]>(values[K_GOALS], []))
-        setTasks(parseJSON<Task[]>(values[K_TASKS], []))
+        // Список задач лежит кусками: первый — под старым ключом, поэтому данные,
+        // записанные до появления расписания, читаются без миграции.
+        const loadedTasks: Task[] = []
+        chunkKeys(K_TASKS).forEach((key, i) => {
+          if (values[key] === undefined) return
+          taskChunks.current = i + 1
+          loadedTasks.push(...parseJSON<Task[]>(values[key], []))
+        })
+        setTasks(loadedTasks)
         setTimer(parseJSON<RunningTimer | null>(values[K_TIMER], null))
         // Слитые настройки с дефолтами: у ранних пользователей ключа ещё нет,
         // а новые поля не должны приезжать как undefined.
@@ -178,9 +192,24 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (loaded.current) queueWrite(K_GOALS, JSON.stringify(next))
   }, [])
 
+  /** Сколько кусков задач уже есть в хранилище — их надо перезаписать, даже если список сжался. */
+  const taskChunks = useRef(0)
+
   const persistTasks = useCallback((next: Task[]) => {
     setTasks(next)
-    if (loaded.current) queueWrite(K_TASKS, JSON.stringify(next))
+    if (!loaded.current) return
+
+    const chunks = packChunks(next)
+    if (chunks.length > MAX_CHUNKS) {
+      setError('Слишком много задач — часть не сохранится. Удали ненужные.')
+    }
+    const used = Math.min(chunks.length, MAX_CHUNKS)
+    // Освободившиеся куски затираем пустым массивом, а не удаляем: очередь записи
+    // держит последнее значение по ключу, и отложенная запись не воскресит старое.
+    for (let i = 0; i < Math.max(used, taskChunks.current); i++) {
+      queueWrite(chunkKey(K_TASKS, i), JSON.stringify(chunks[i] ?? []))
+    }
+    taskChunks.current = Math.max(taskChunks.current, used)
   }, [])
 
   const setAi = useCallback((next: AiSettings) => {
@@ -369,6 +398,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const nextTasks = [...tasks]
       const applied: string[] = []
       const completed: string[] = []
+      let tasksDirty = false
 
       const findGoal = (title: string) =>
         nextGoals.find((g) => g.title.toLowerCase() === title.trim().toLowerCase())
@@ -388,19 +418,53 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         } else if (action.type === 'create_task') {
           const goal = findGoal(action.goal)
           if (!goal) continue
-          const duplicate = nextTasks.some(
-            (t) => t.goalId === goal.id && t.title.toLowerCase() === action.title.toLowerCase(),
-          )
-          if (duplicate) continue
-          nextTasks.push({
+          const task: Task = {
             id: newId(),
             createdAt: date,
             goalId: goal.id,
             title: action.title,
             days: action.days,
             date: action.date,
-          })
-          applied.push(`Задача «${action.title}»`)
+            time: action.time,
+            duration: action.time ? action.duration : undefined,
+          }
+          // Дубль — то же название с тем же расписанием. Два блока «Тренировка» в разное
+          // время — законное расписание, их терять нельзя.
+          const duplicate = nextTasks.some(
+            (t) =>
+              t.goalId === goal.id &&
+              t.title.toLowerCase() === task.title.toLowerCase() &&
+              sameSchedule(t, task),
+          )
+          if (duplicate) continue
+          nextTasks.push(task)
+          tasksDirty = true
+          const label = scheduleLabel(task)
+          applied.push(`Задача «${task.title}»${label ? ` — ${label}` : ''}`)
+        } else if (action.type === 'reschedule_task') {
+          const idx = nextTasks.findIndex(
+            (t) => t.title.toLowerCase() === action.task.trim().toLowerCase(),
+          )
+          if (idx === -1) continue
+          const current = nextTasks[idx]
+
+          const updated: Task = { ...current }
+          if (action.time !== undefined) updated.time = action.time
+          if (action.duration !== undefined) updated.duration = action.duration
+          if (action.date) {
+            updated.date = action.date
+            updated.days = []
+          } else if (action.days) {
+            updated.days = action.days
+            updated.date = undefined
+          }
+          // Длительность без времени бессмысленна.
+          if (!updated.time) updated.duration = undefined
+
+          if (JSON.stringify(updated) === JSON.stringify(current)) continue
+          nextTasks[idx] = updated
+          tasksDirty = true
+          applied.push(`Перенесено: «${current.title}» — ${scheduleLabel(updated) ?? 'каждый день'}`)
         } else if (action.type === 'complete_task') {
           const task = nextTasks.find(
             (t) => t.title.toLowerCase() === action.task.trim().toLowerCase(),
@@ -414,7 +478,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }
 
       if (nextGoals.length !== goals.length) persistGoals(nextGoals)
-      if (nextTasks.length !== tasks.length) persistTasks(nextTasks)
+      if (tasksDirty) persistTasks(nextTasks)
       for (const id of completed) toggleTask(date, id)
 
       return applied

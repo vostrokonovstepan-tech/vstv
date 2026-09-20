@@ -119,6 +119,7 @@ export function GoalDetail({ goalId, onBack }: { goalId: string; onBack: () => v
                 <TaskRow
                   task={task}
                   goal={goal}
+                  hideTime
                   done={store.isDone(date, task.id)}
                   onToggle={() => store.toggleTask(date, task.id)}
                   onEdit={() => setTaskSheet({ task })}

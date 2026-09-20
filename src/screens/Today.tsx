@@ -11,6 +11,7 @@ import { Button, EmptyState, SectionTitle } from '../components/ui'
 import { accentColor } from '../lib/accents'
 import { formatFullDate, formatHours, plural, today as todayISO } from '../lib/date'
 import { currentStreak, dayStats, getDayLog, tasksForDate } from '../lib/progress'
+import { sortByTime } from '../lib/schedule'
 import { haptic } from '../lib/telegram'
 
 export function Today() {
@@ -32,7 +33,7 @@ export function Today() {
   const groups = useMemo(() => {
     const due = tasksForDate(tasks, date)
     return goals
-      .map((goal) => ({ goal, items: due.filter((t) => t.goalId === goal.id) }))
+      .map((goal) => ({ goal, items: sortByTime(due.filter((t) => t.goalId === goal.id)) }))
       .filter((group) => group.items.length > 0)
   }, [goals, tasks, date])
 

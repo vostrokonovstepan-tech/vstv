@@ -29,6 +29,10 @@ export type Task = {
    * в этот день, а `days` не учитывается.
    */
   date?: string
+  /** Время начала, "HH:MM", 24 часа. Задачи со временем образуют расписание. */
+  time?: string
+  /** Длительность в минутах; без неё задача — просто точка во времени. */
+  duration?: number
   createdAt: string
   archived?: boolean
 }

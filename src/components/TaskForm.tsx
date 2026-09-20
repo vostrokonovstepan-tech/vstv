@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { Goal, Task } from '../types'
 import { accentColor } from '../lib/accents'
 import { WEEKDAYS_SHORT, formatDayMonth, today } from '../lib/date'
+import { timeRange } from '../lib/schedule'
 import { Button, Field, TextInput } from './ui'
 import { confirmDialog } from '../lib/telegram'
 
@@ -12,19 +13,42 @@ type Props = {
   goals: Goal[]
   task?: Task
   defaultGoalId?: string
-  onSave: (data: { goalId: string; title: string; days: number[]; date?: string }) => void
+  /** Предзаполнение для новой задачи — например, дата, выбранная в календаре расписания. */
+  defaults?: { mode?: Mode; date?: string }
+  onSave: (data: {
+    goalId: string
+    title: string
+    days: number[]
+    date?: string
+    time?: string
+    duration?: number
+  }) => void
   onDelete?: () => void
   onClose: () => void
 }
 
 type Mode = 'repeat' | 'once'
 
-export function TaskForm({ goals, task, defaultGoalId, onSave, onDelete, onClose }: Props) {
+/** [минуты, подпись]. Нестандартную длительность (например, от помощника) добавляем отдельной кнопкой. */
+const DURATIONS: [number, string][] = [
+  [15, '15 мин'],
+  [30, '30 мин'],
+  [45, '45 мин'],
+  [60, '1 ч'],
+  [90, '1,5 ч'],
+  [120, '2 ч'],
+]
+
+export function TaskForm({ goals, task, defaultGoalId, defaults, onSave, onDelete, onClose }: Props) {
   const [title, setTitle] = useState(task?.title ?? '')
   const [goalId, setGoalId] = useState(task?.goalId ?? defaultGoalId ?? goals[0]?.id ?? '')
   const [days, setDays] = useState<number[]>(task?.days ?? [])
-  const [mode, setMode] = useState<Mode>(task?.date ? 'once' : 'repeat')
-  const [date, setDate] = useState(task?.date ?? today())
+  const [mode, setMode] = useState<Mode>(
+    task ? (task.date ? 'once' : 'repeat') : (defaults?.mode ?? 'repeat'),
+  )
+  const [date, setDate] = useState(task?.date ?? defaults?.date ?? today())
+  const [time, setTime] = useState(task?.time ?? '')
+  const [duration, setDuration] = useState<number | undefined>(task?.duration)
 
   const trimmed = title.trim()
   const goal = goals.find((g) => g.id === goalId)
@@ -48,6 +72,9 @@ export function TaskForm({ goals, task, defaultGoalId, onSave, onDelete, onClose
       days: mode === 'once' ? [] : days,
       // undefined важен: при переключении обратно на повтор он стирает дату.
       date: mode === 'once' ? date : undefined,
+      // Так же undefined: убранное время должно стереться, а не остаться от прошлого сохранения.
+      time: time || undefined,
+      duration: time ? duration : undefined,
     })
     onClose()
   }
@@ -154,6 +181,52 @@ export function TaskForm({ goals, task, defaultGoalId, onSave, onDelete, onClose
               {date
                 ? `Появится один раз — ${formatDayMonth(date)}`
                 : 'Выбери дату, когда нужно это сделать'}
+            </p>
+          </>
+        )}
+      </Field>
+
+      <Field label="Время — необязательно">
+        <div className="flex items-center gap-2">
+          <TextInput type="time" value={time} onChange={(e) => setTime(e.target.value)} />
+          {time && (
+            <button
+              type="button"
+              onClick={() => {
+                setTime('')
+                setDuration(undefined)
+              }}
+              className="press shrink-0 rounded-xl px-3 py-3 text-[14px] text-hint"
+            >
+              Убрать
+            </button>
+          )}
+        </div>
+
+        {time && (
+          <>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {(duration && !DURATIONS.some(([m]) => m === duration)
+                ? [...DURATIONS, [duration, `${duration} мин`] as [number, string]]
+                : DURATIONS
+              ).map(([mins, label]) => (
+                <button
+                  key={mins}
+                  type="button"
+                  onClick={() => setDuration(duration === mins ? undefined : mins)}
+                  className="press rounded-full px-3.5 py-2 text-[14px] font-medium"
+                  style={
+                    duration === mins
+                      ? { background: color, color: '#fff' }
+                      : { background: 'var(--color-surface)' }
+                  }
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <p className="mt-2 px-1 text-[13px] text-hint">
+              {duration ? timeRange(time, duration) : `С ${time} — без длительности`}
             </p>
           </>
         )}

@@ -3,6 +3,7 @@ import { StoreProvider, useStore } from './store'
 import { TabBar, type Tab } from './components/TabBar'
 import { TimerBar } from './components/TimerBar'
 import { Today } from './screens/Today'
+import { Schedule } from './screens/Schedule'
 import { Goals } from './screens/Goals'
 import { GoalDetail } from './screens/GoalDetail'
 import { Assistant } from './screens/Assistant'
@@ -62,6 +63,8 @@ function Router() {
         <GoalDetail goalId={openGoalId} onBack={closeGoal} />
       ) : tab === 'today' ? (
         <Today />
+      ) : tab === 'schedule' ? (
+        <Schedule />
       ) : tab === 'goals' ? (
         <Goals onOpen={setOpenGoalId} />
       ) : tab === 'assistant' ? (

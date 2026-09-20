@@ -1,5 +1,6 @@
 import type { Goal, Task } from '../types'
 import { accentColor } from '../lib/accents'
+import { timeRange } from '../lib/schedule'
 import { haptic } from '../lib/telegram'
 
 type Props = {
@@ -9,10 +10,14 @@ type Props = {
   onToggle: () => void
   /** Показывать эмодзи и название цели — на экране «Сегодня», где задачи вперемешку. */
   showGoal?: boolean
+  /** Не показывать время: там, где расписание уже подписано отдельной строкой. */
+  hideTime?: boolean
+  /** Отметить нельзя — например, задача на будущий день. */
+  disabled?: boolean
   onEdit?: () => void
 }
 
-export function TaskRow({ task, goal, done, onToggle, showGoal, onEdit }: Props) {
+export function TaskRow({ task, goal, done, onToggle, showGoal, hideTime, disabled, onEdit }: Props) {
   const color = accentColor(goal?.accent)
 
   return (
@@ -22,11 +27,12 @@ export function TaskRow({ task, goal, done, onToggle, showGoal, onEdit }: Props)
         role="checkbox"
         aria-checked={done}
         aria-label={task.title}
+        disabled={disabled}
         onClick={() => {
           haptic(done ? 'select' : 'success')
           onToggle()
         }}
-        className="press grid size-7 shrink-0 place-items-center rounded-full border-2"
+        className="press grid size-7 shrink-0 place-items-center rounded-full border-2 disabled:opacity-40"
         style={{
           borderColor: done ? color : 'var(--color-line)',
           background: done ? color : 'transparent',
@@ -41,15 +47,25 @@ export function TaskRow({ task, goal, done, onToggle, showGoal, onEdit }: Props)
 
       <button
         type="button"
+        disabled={disabled}
         onClick={onToggle}
         className="min-w-0 flex-1 text-left"
       >
         <div className={`truncate text-[15px] ${done ? 'text-hint line-through' : ''}`}>
           {task.title}
         </div>
-        {showGoal && goal && (
-          <div className="mt-0.5 truncate text-[13px] text-hint">
-            {goal.emoji} {goal.title}
+        {((task.time && !hideTime) || (showGoal && goal)) && (
+          <div className="mt-0.5 flex items-center gap-2 text-[13px] text-hint">
+            {task.time && !hideTime && (
+              <span className="tabular shrink-0 font-medium" style={{ color }}>
+                {timeRange(task.time, task.duration)}
+              </span>
+            )}
+            {showGoal && goal && (
+              <span className="truncate">
+                {goal.emoji} {goal.title}
+              </span>
+            )}
           </div>
         )}
       </button>

@@ -10,6 +10,7 @@ import {
   today,
   weekdayOf,
 } from './date'
+import { timeRange } from './schedule'
 
 /** Дальше этого в прошлое не считаем — истории всё равно столько не загружено. */
 const MAX_LOOKBACK_DAYS = 366
@@ -31,17 +32,25 @@ export function isScheduled(task: Task, date: string): boolean {
 }
 
 /**
- * Подпись расписания под задачей: «16 августа» для разовой,
- * «пн, ср, пт» для выборочных дней, null для ежедневной — там подпись лишняя.
+ * Подпись расписания под задачей: «16 августа» для разовой, «пн, ср, пт» для
+ * выборочных дней; время добавляется через « · ». Для ежедневной задачи без
+ * времени подпись лишняя — null.
  */
 export function scheduleLabel(task: Task): string | null {
-  if (task.date) return formatDayMonth(task.date)
-  if (task.days.length === 0) return null
-  return task.days
-    .slice()
-    .sort((a, b) => shortWeekdayIndex(a) - shortWeekdayIndex(b))
-    .map((d) => WEEKDAYS_SHORT[shortWeekdayIndex(d)])
-    .join(', ')
+  const range = task.time ? timeRange(task.time, task.duration) : null
+
+  let base: string | null
+  if (task.date) base = formatDayMonth(task.date)
+  else if (task.days.length === 0) base = range ? 'каждый день' : null
+  else {
+    base = task.days
+      .slice()
+      .sort((a, b) => shortWeekdayIndex(a) - shortWeekdayIndex(b))
+      .map((d) => WEEKDAYS_SHORT[shortWeekdayIndex(d)])
+      .join(', ')
+  }
+
+  return [base, range].filter(Boolean).join(' · ') || null
 }
 
 export function tasksForDate(tasks: Task[], date: string): Task[] {

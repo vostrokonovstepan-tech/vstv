@@ -82,9 +82,12 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 
+/*
+  Цвет кнопок наследует Tailwind Preflight — в слое base. Правило вне слоя перебивает
+  любые слои, поэтому здесь `color: inherit` глушил бы все text-* классы на кнопках.
+*/
 button {
   font: inherit;
-  color: inherit;
 }
 
 /* Целые числа в статистике не должны «прыгать» при тике таймера. */
