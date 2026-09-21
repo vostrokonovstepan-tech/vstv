@@ -12,7 +12,14 @@ import type { AccentKey, DayLog, Goal, MonthLog, RunningTimer, Task } from './ty
 import { dayOf, monthOf, recentMonths, today } from './lib/date'
 import { DEFAULT_AI, type AiSettings } from './lib/ai'
 import type { Action, ChatTurn } from './lib/aiChat'
-import { MAX_CHUNKS, chunkKey, chunkKeys, packChunks } from './lib/chunks'
+import {
+  MAX_CHUNKS,
+  MAX_RECORD_CHUNKS,
+  chunkKey,
+  chunkKeys,
+  packChunks,
+  packRecordChunks,
+} from './lib/chunks'
 import { scheduleLabel } from './lib/progress'
 import { sameSchedule } from './lib/schedule'
 import {
@@ -32,14 +39,30 @@ const K_AI = 'v1_ai'
 const K_CHAT = 'v1_chat'
 const monthKey = (m: string) => `v1_m_${m}`
 /**
- * Заметки дня хранятся отдельным ключом от чек-листа и секунд намеренно:
- * если бы они лежали в одном значении, длинная заметка за один день могла бы
- * упереться в 4-килобайтный лимит CloudStorage и не сохранить заодно и отметки
- * о выполнении задач за весь месяц.
+ * Заметки дня хранятся отдельным ключом от чек-листа и секунд намеренно: при
+ * сбое записи заметок не должны страдать отметки о выполнении задач за месяц.
  */
 const noteMonthKey = (m: string) => `v1_n_${m}`
-/** Хвост дня в заметке — оставляет запас, чтобы месяц из ~30 дней влезал в 4 КБ. */
+/**
+ * Предел длины заметки за день. Месяц таких заметок — до ~16 000 символов, то есть
+ * не влезает в одно значение CloudStorage (4096), поэтому месяц хранится кусками.
+ */
 export const NOTE_MAX_LENGTH = 500
+
+/** Собирает месячный словарь из кусков и запоминает, сколько кусков уже лежит в хранилище. */
+function readRecord<V>(
+  values: Record<string, string>,
+  base: string,
+  seen: Map<string, number>,
+): Record<string, V> {
+  const out: Record<string, V> = {}
+  chunkKeys(base, MAX_RECORD_CHUNKS).forEach((key, i) => {
+    if (values[key] === undefined) return
+    seen.set(base, i + 1)
+    Object.assign(out, parseJSON<Record<string, V>>(values[key], {}))
+  })
+  return out
+}
 
 /** Сколько месяцев истории поднимаем при старте — хватает на серии и годовой график. */
 const HISTORY_MONTHS = 12
@@ -119,6 +142,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   // Пишем в хранилище только после первой загрузки, иначе стартовый
   // пустой стейт затрёт то, что уже лежит в облаке.
   const loaded = useRef(false)
+  /** Ключ месячного словаря → сколько кусков под ним уже есть в хранилище. */
+  const recordChunks = useRef(new Map<string, number>())
 
   useEffect(() => {
     setStorageErrorHandler((err) => {
@@ -131,7 +156,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const months12 = recentMonths(HISTORY_MONTHS)
     const keys = [
       K_GOALS, ...chunkKeys(K_TASKS), K_TIMER, K_AI, K_CHAT,
-      ...months12.map(monthKey), ...months12.map(noteMonthKey),
+      ...months12.flatMap((m) => chunkKeys(monthKey(m), MAX_RECORD_CHUNKS)),
+      ...months12.flatMap((m) => chunkKeys(noteMonthKey(m), MAX_RECORD_CHUNKS)),
     ]
 
     getMany(keys)
@@ -155,8 +181,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const loadedMonths: Record<string, MonthLog> = {}
         const loadedNotes: Record<string, Record<string, string>> = {}
         for (const m of months12) {
-          loadedMonths[m] = parseJSON<MonthLog>(values[monthKey(m)], {})
-          loadedNotes[m] = parseJSON<Record<string, string>>(values[noteMonthKey(m)], {})
+          loadedMonths[m] = readRecord<DayLog>(values, monthKey(m), recordChunks.current)
+          loadedNotes[m] = readRecord<string>(values, noteMonthKey(m), recordChunks.current)
         }
         setMonths(loadedMonths)
         setNotes(loadedNotes)
@@ -212,6 +238,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     taskChunks.current = Math.max(taskChunks.current, used)
   }, [])
 
+  /** Пишет месячный словарь кусками; освободившиеся куски затираются пустым словарём. */
+  const writeRecord = useCallback((base: string, record: Record<string, unknown>) => {
+    const chunks = packRecordChunks(record)
+    if (chunks.length > MAX_RECORD_CHUNKS) {
+      setError('Слишком много записей за месяц — часть не сохранится.')
+    }
+    const used = Math.min(chunks.length, MAX_RECORD_CHUNKS)
+    const seen = recordChunks.current.get(base) ?? 0
+    for (let i = 0; i < Math.max(used, seen); i++) {
+      queueWrite(chunkKey(base, i), JSON.stringify(chunks[i] ?? {}))
+    }
+    recordChunks.current.set(base, Math.max(seen, used))
+  }, [])
+
   const setAi = useCallback((next: AiSettings) => {
     setAiState(next)
     // Ключ пишем сразу: пользователь ждёт результата проверки соединения.
@@ -254,11 +294,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!loaded.current || dirtyMonths.current.size === 0) return
-    for (const m of dirtyMonths.current) {
-      queueWrite(monthKey(m), JSON.stringify(months[m] ?? {}))
-    }
+    for (const m of dirtyMonths.current) writeRecord(monthKey(m), months[m] ?? {})
     dirtyMonths.current.clear()
-  }, [months])
+  }, [months, writeRecord])
 
   const dirtyNoteMonths = useRef(new Set<string>())
 
@@ -282,11 +320,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!loaded.current || dirtyNoteMonths.current.size === 0) return
-    for (const m of dirtyNoteMonths.current) {
-      queueWrite(noteMonthKey(m), JSON.stringify(notes[m] ?? {}))
-    }
+    for (const m of dirtyNoteMonths.current) writeRecord(noteMonthKey(m), notes[m] ?? {})
     dirtyNoteMonths.current.clear()
-  }, [notes])
+  }, [notes, writeRecord])
 
   const dayLog = useCallback(
     (date: string): DayLog => months[monthOf(date)]?.[dayOf(date)] ?? {},

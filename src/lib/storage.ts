@@ -22,6 +22,9 @@ export class ValueTooLargeError extends Error {
   }
 }
 
+/** Ключей в одном запросе к CloudStorage: список разросся до сотни, а держать один вызов на всё незачем. */
+const BATCH_SIZE = 40
+
 export async function getMany(keys: string[]): Promise<Record<string, string>> {
   if (keys.length === 0) return {}
   const cs = cloudStorage()
@@ -33,17 +36,27 @@ export async function getMany(keys: string[]): Promise<Record<string, string>> {
     }
     return out
   }
-  return new Promise((resolve, reject) => {
-    cs.getItems(keys, (err, values) => {
-      if (err) reject(new Error(err))
-      // CloudStorage возвращает отсутствующие ключи как пустые строки — отсеиваем.
-      else {
-        const out: Record<string, string> = {}
-        for (const [k, v] of Object.entries(values ?? {})) if (v) out[k] = v
-        resolve(out)
-      }
-    })
-  })
+
+  const batches: string[][] = []
+  for (let i = 0; i < keys.length; i += BATCH_SIZE) batches.push(keys.slice(i, i + BATCH_SIZE))
+
+  const parts = await Promise.all(
+    batches.map(
+      (batch) =>
+        new Promise<Record<string, string>>((resolve, reject) => {
+          cs.getItems(batch, (err, values) => {
+            if (err) reject(new Error(err))
+            // CloudStorage возвращает отсутствующие ключи как пустые строки — отсеиваем.
+            else {
+              const out: Record<string, string> = {}
+              for (const [k, v] of Object.entries(values ?? {})) if (v) out[k] = v
+              resolve(out)
+            }
+          })
+        }),
+    ),
+  )
+  return Object.assign({}, ...parts)
 }
 
 export async function setItem(key: string, value: string): Promise<void> {
