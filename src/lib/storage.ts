@@ -67,7 +67,12 @@ export async function setItem(key: string, value: string): Promise<void> {
     return
   }
   return new Promise((resolve, reject) => {
-    cs.setItem(key, value, (err) => (err ? reject(new Error(err)) : resolve()))
+    // Второй аргумент — подтверждение, что значение сохранено; false без текста ошибки тоже провал.
+    cs.setItem(key, value, (err, ok) => {
+      if (err) reject(new Error(err))
+      else if (ok === false) reject(new Error('Telegram не подтвердил сохранение'))
+      else resolve()
+    })
   })
 }
 
@@ -121,10 +126,24 @@ async function flushKey(key: string) {
   }
 }
 
-export function queueWrite(key: string, value: string, delayMs = 600) {
+/** Пауза перед отложенной записью: склеивает частые правки, но не даёт закрытию приложения её обогнать. */
+const DEFAULT_DELAY_MS = 300
+
+export function queueWrite(key: string, value: string, delayMs = DEFAULT_DELAY_MS) {
   pending.set(key, value)
   clearTimeout(timers.get(key))
   timers.set(key, setTimeout(() => void flushKey(key), delayMs))
+}
+
+/**
+ * Пишет сразу и возвращает результат: для действий, после которых пользователь ждёт
+ * подтверждения. Отложенная запись того же ключа отменяется — она устарела.
+ */
+export async function saveNow(key: string, value: string): Promise<void> {
+  clearTimeout(timers.get(key))
+  timers.delete(key)
+  pending.delete(key)
+  await setItem(key, value)
 }
 
 /** Сбрасывает все отложенные записи немедленно — перед сворачиванием/закрытием. */

@@ -10,6 +10,7 @@ import { accentColor } from '../lib/accents'
 import { dayOf, formatHours, plural, today as todayISO } from '../lib/date'
 import { currentStreak, daySeries, goalProgress, longestStreak, taskProgress, totalSeconds } from '../lib/progress'
 import { telegramUser } from '../lib/telegram'
+import { BUILD } from '../lib/useUpdateCheck'
 
 const CHART_DAYS = 14
 
@@ -161,6 +162,8 @@ export function Profile() {
           </svg>
         </button>
       </section>
+
+      <p className="px-1 text-center text-[12px] text-hint">Версия {BUILD}</p>
 
       <Sheet open={aiSheet} title="Помощник" onClose={() => setAiSheet(false)}>
         <AiSettingsForm value={ai} onSave={setAi} onClose={() => setAiSheet(false)} />

@@ -22,6 +22,7 @@ import {
 } from './lib/chunks'
 import { scheduleLabel } from './lib/progress'
 import { sameSchedule } from './lib/schedule'
+import { tg } from './lib/telegram'
 import {
   MAX_VALUE_LENGTH,
   flushAll,
@@ -29,6 +30,7 @@ import {
   parseJSON,
   queueWrite,
   removeItem,
+  saveNow,
   setStorageErrorHandler,
 } from './lib/storage'
 
@@ -89,6 +91,9 @@ export type TaskInput = {
 
 export type Store = {
   ready: boolean
+  /** Загрузка не удалась — записи выключены, чтобы не затереть облако пустым состоянием. */
+  loadError: string | null
+  retryLoad: () => void
   error: string | null
   dismissError: () => void
 
@@ -106,7 +111,10 @@ export type Store = {
 
   notes: Record<string, Record<string, string>>
   getNote: (date: string) => string
-  setNote: (date: string, text: string) => void
+  /** false — заметка есть на экране, но в хранилище не дошла. */
+  isNotePersisted: (date: string) => boolean
+  /** Записывает сразу; промис отклоняется, если в хранилище не дошло. Текст остаётся в памяти при любом исходе. */
+  setNote: (date: string, text: string) => Promise<void>
 
   addGoal: (input: GoalInput) => Goal
   updateGoal: (id: string, patch: Partial<Goal>) => void
@@ -138,6 +146,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [ai, setAiState] = useState<AiSettings>(DEFAULT_AI)
   const [chatHistory, setChatHistoryState] = useState<ChatTurn[]>([])
   const [notes, setNotes] = useState<Record<string, Record<string, string>>>({})
+  const [loadError, setLoadError] = useState<string | null>(null)
+  /**
+   * Актуальные заметки без ожидания перерисовки: запись в хранилище должна уйти
+   * сразу же, а состояние React обновляется только на следующем рендере.
+   */
+  const notesRef = useRef<Record<string, Record<string, string>>>({})
 
   // Пишем в хранилище только после первой загрузки, иначе стартовый
   // пустой стейт затрёт то, что уже лежит в облаке.
@@ -151,8 +165,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     })
   }, [])
 
-  useEffect(() => {
-    let cancelled = false
+  /** Номер последней начатой загрузки: ответ от устаревшей (перезапущенной) игнорируется. */
+  const loadRun = useRef(0)
+
+  const load = useCallback(() => {
+    const run = ++loadRun.current
+    setLoadError(null)
     const months12 = recentMonths(HISTORY_MONTHS)
     const keys = [
       K_GOALS, ...chunkKeys(K_TASKS), K_TIMER, K_AI, K_CHAT,
@@ -162,7 +180,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
     getMany(keys)
       .then((values) => {
-        if (cancelled) return
+        if (run !== loadRun.current) return
         setGoals(parseJSON<Goal[]>(values[K_GOALS], []))
         // Список задач лежит кусками: первый — под старым ключом, поэтому данные,
         // записанные до появления расписания, читаются без миграции.
@@ -185,31 +203,38 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           loadedNotes[m] = readRecord<string>(values, noteMonthKey(m), recordChunks.current)
         }
         setMonths(loadedMonths)
+        notesRef.current = loadedNotes
         setNotes(loadedNotes)
-      })
-      .catch((err: unknown) => {
-        if (cancelled) return
-        setError(err instanceof Error ? err.message : 'Не удалось загрузить данные')
-      })
-      .finally(() => {
-        if (cancelled) return
+        // Запись включается только после успешной загрузки: иначе пустое состояние
+        // затёрло бы то, что лежит в облаке.
         loaded.current = true
         setReady(true)
       })
-
-    return () => {
-      cancelled = true
-    }
+      .catch((err: unknown) => {
+        if (run !== loadRun.current) return
+        setLoadError(err instanceof Error ? err.message : 'Не удалось загрузить данные')
+      })
   }, [])
 
-  // Не теряем несохранённое, когда мини-ап уходит в фон или закрывается.
+  useEffect(() => {
+    load()
+    return () => {
+      loadRun.current++
+    }
+  }, [load])
+
+  // Не теряем несохранённое, когда мини-ап уходит в фон или закрывается. События
+  // страницы в WebView Telegram при закрытии приходят не всегда, поэтому слушаем и
+  // собственное событие Telegram — «свернули» — и не откладываем запись надолго.
   useEffect(() => {
     const flush = () => void flushAll()
     document.addEventListener('visibilitychange', flush)
     window.addEventListener('pagehide', flush)
+    tg()?.onEvent('deactivated', flush)
     return () => {
       document.removeEventListener('visibilitychange', flush)
       window.removeEventListener('pagehide', flush)
+      tg()?.offEvent('deactivated', flush)
     }
   }, [])
 
@@ -250,6 +275,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       queueWrite(chunkKey(base, i), JSON.stringify(chunks[i] ?? {}))
     }
     recordChunks.current.set(base, Math.max(seen, used))
+  }, [])
+
+  /** То же, но сразу и с результатом: если хоть один кусок не записался, это ошибка. */
+  const writeRecordNow = useCallback(async (base: string, record: Record<string, unknown>) => {
+    const chunks = packRecordChunks(record)
+    if (chunks.length > MAX_RECORD_CHUNKS) {
+      throw new Error('Слишком много записей за месяц — часть не сохранится.')
+    }
+    const total = Math.max(chunks.length, recordChunks.current.get(base) ?? 0)
+    await Promise.all(
+      Array.from({ length: total }, (_, i) =>
+        saveNow(chunkKey(base, i), JSON.stringify(chunks[i] ?? {})),
+      ),
+    )
+    recordChunks.current.set(base, total)
   }, [])
 
   const setAi = useCallback((next: AiSettings) => {
@@ -298,31 +338,73 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     dirtyMonths.current.clear()
   }, [months, writeRecord])
 
-  const dirtyNoteMonths = useRef(new Set<string>())
-
   const getNote = useCallback(
     (date: string): string => notes[monthOf(date)]?.[dayOf(date)] ?? '',
     [notes],
   )
 
-  const setNote = useCallback((date: string, text: string) => {
+  /** Месяцы, чьи заметки не дошли до хранилища. Пока месяц в этом списке, экран не имеет права писать «сохранено». */
+  const unsavedNoteMonths = useRef(new Set<string>())
+  /** Номер последней записи по месяцу: итог определяет самая свежая — в ней уже есть всё предыдущее. */
+  const noteWriteSeq = useRef(new Map<string, number>())
+
+  const persistNoteMonth = useCallback(
+    (m: string): Promise<void> => {
+      const id = (noteWriteSeq.current.get(m) ?? 0) + 1
+      noteWriteSeq.current.set(m, id)
+      return writeRecordNow(noteMonthKey(m), notesRef.current[m] ?? {}).then(
+        () => {
+          if (noteWriteSeq.current.get(m) === id) unsavedNoteMonths.current.delete(m)
+        },
+        (err: unknown) => {
+          if (noteWriteSeq.current.get(m) === id) unsavedNoteMonths.current.add(m)
+          // Баннер — на случай, когда редактора уже нет на экране, а запись не удалась.
+          setError(`Заметка не сохранилась: ${err instanceof Error ? err.message : 'неизвестная ошибка'}`)
+          throw err
+        },
+      )
+    },
+    [writeRecordNow],
+  )
+
+  // Не дошедшие заметки пробуем записать снова, как только приложение снова в деле.
+  useEffect(() => {
+    const retry = () => {
+      for (const m of [...unsavedNoteMonths.current]) void persistNoteMonth(m).catch(() => {})
+    }
+    document.addEventListener('visibilitychange', retry)
+    tg()?.onEvent('activated', retry)
+    return () => {
+      document.removeEventListener('visibilitychange', retry)
+      tg()?.offEvent('activated', retry)
+    }
+  }, [persistNoteMonth])
+
+  const isNotePersisted = useCallback(
+    (date: string) => !unsavedNoteMonths.current.has(monthOf(date)),
+    [],
+  )
+
+  /**
+   * Заметка пишется сразу, а не через очередь: человек нажал «сохранить» и может тут
+   * же закрыть приложение. Результат возвращается — редактор показывает, дошло ли
+   * до хранилища, а не рисует галочку заранее. В памяти заметка остаётся при любом
+   * исходе, чтобы текст не пропал с экрана, если запись не удалась.
+   */
+  const setNote = useCallback((date: string, text: string): Promise<void> => {
     const m = monthOf(date)
     const d = dayOf(date)
     const trimmed = text.trim().slice(0, NOTE_MAX_LENGTH)
-    dirtyNoteMonths.current.add(m)
-    setNotes((prev) => {
-      const month = { ...(prev[m] ?? {}) }
-      if (trimmed) month[d] = trimmed
-      else delete month[d]
-      return { ...prev, [m]: month }
-    })
-  }, [])
 
-  useEffect(() => {
-    if (!loaded.current || dirtyNoteMonths.current.size === 0) return
-    for (const m of dirtyNoteMonths.current) writeRecord(noteMonthKey(m), notes[m] ?? {})
-    dirtyNoteMonths.current.clear()
-  }, [notes, writeRecord])
+    const month = { ...(notesRef.current[m] ?? {}) }
+    if (trimmed) month[d] = trimmed
+    else delete month[d]
+    notesRef.current = { ...notesRef.current, [m]: month }
+    setNotes(notesRef.current)
+
+    if (!loaded.current) return Promise.reject(new Error('Данные ещё не загружены'))
+    return persistNoteMonth(m)
+  }, [persistNoteMonth])
 
   const dayLog = useCallback(
     (date: string): DayLog => months[monthOf(date)]?.[dayOf(date)] ?? {},
@@ -525,6 +607,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const value = useMemo<Store>(
     () => ({
       ready,
+      loadError,
+      retryLoad: load,
       error,
       dismissError: () => setError(null),
       goals,
@@ -539,6 +623,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       isDone,
       notes,
       getNote,
+      isNotePersisted,
       setNote,
       addGoal,
       updateGoal,
@@ -553,8 +638,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       applyAiActions,
     }),
     [
-      ready, error, goals, tasks, months, timer, ai, setAi, chatHistory, setChatHistory, dayLog, isDone,
-      notes, getNote, setNote,
+      ready, loadError, load, error, goals, tasks, months, timer, ai, setAi, chatHistory, setChatHistory, dayLog, isDone,
+      notes, getNote, isNotePersisted, setNote,
       addGoal, updateGoal, removeGoal, addTask, updateTask, removeTask,
       toggleTask, addSeconds, startTimer, stopTimer, applyAiActions,
     ],
